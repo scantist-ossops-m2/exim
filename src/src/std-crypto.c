@@ -347,15 +347,19 @@ static const char dh_ike_18_pem[] =
 
    q = F518AA87 81A8DF27 8ABA4E7D 64B7CB9D 49462353
 */
+/* OpenSSL 1.0.2j
+ * openssl genpkey -genparam -algorithm DH -outform PEM -pkeyopt dh_rfc5114:1
+ */
 static const char dh_ike_22_pem[] =
-"-----BEGIN DH PARAMETERS-----\n"
-"MIIBCAKBgQCxC4+WoIDgHd6S3l6uXVTsUsmfvPsGo8aaap3KUtI7YWBz4oZ1oj0Y\n"
+"-----BEGIN X9.42 DH PARAMETERS-----\n"
+"MIIBHwKBgQCxC4+WoIDgHd6S3l6uXVTsUsmfvPsGo8aaap3KUtI7YWBz4oZ1oj0Y\n"
 "mDjvHi7mUsAT7LSuqQYRIySXXDzUm4O/rMvdfZDEvXCYSI6cIZpzck7/1vrlZEc4\n"
 "+qMaT/VbzMChUa9fDci0vUW/N982XBpl5oz9p21NpwjfH7K8LkpDcQKBgQCk0cvV\n"
 "w/00EmdlpELvuZkF+BBN0lisUH/WQGz/FCZtMSZv6h5cQVZLd35pD1UE8hMWAhe0\n"
 "sBuIal6RVH+eJ0n01/vX07mpLuGQnQ0iY/gKdqaiTAh6CR9THb8KAWm2oorWYqTR\n"
-"jnOvoy13nVkY0IvIhY9Nzvl8KiSFXm7rIrOy5Q==\n"
-"-----END DH PARAMETERS-----\n";
+"jnOvoy13nVkY0IvIhY9Nzvl8KiSFXm7rIrOy5QIVAPUYqoeBqN8nirpOfWS3y51J\n"
+"RiNT\n"
+"-----END X9.42 DH PARAMETERS-----\n";
 
 /* RFC 5114 IKE_id=23
 2.2.  2048-bit MODP Group with 224-bit Prime Order Subgroup
@@ -393,9 +397,12 @@ static const char dh_ike_22_pem[] =
    q =  801C0D34 C58D93FE 99717710 1F80535A 4738CEBC BF389A99
         B36371EB
 */
+/* OpenSSL 1.0.2j
+ * openssl genpkey -genparam -algorithm DH -outform PEM -pkeyopt dh_rfc5114:2
+ */
 static const char dh_ike_23_pem[] =
-"-----BEGIN DH PARAMETERS-----\n"
-"MIICCgKCAQEArRB+HpEjqdDWYPqnlVnFH6INZOVoO5/RtUsVl7YdCnXm+hQd+VpW\n"
+"-----BEGIN X9.42 DH PARAMETERS-----\n"
+"MIICKQKCAQEArRB+HpEjqdDWYPqnlVnFH6INZOVoO5/RtUsVl7YdCnXm+hQd+VpW\n"
 "26+aPEB7od8V6z1oijCcGA4d5rhaEnSgpm0/gVKtasISkDfJ7e/aTfjZHo/vVbc5\n"
 "S3rVt9C2wSIHyfmNEe002/bGugssi7wnvmoA4KC5xJcIs7+KMXCRiDaBKGEwvImF\n"
 "2xYC5xRBXZMwJ4Jzx94x79xzEPcSH9WgdBWYfZrcCkhtzfk6zEQyg4cxXXXhmMZB\n"
@@ -405,8 +412,9 @@ static const char dh_ike_23_pem[] =
 "kAGo1mrXwXZpEBmZAkr00CcnWsE0i7inYtBSG8mK4kcVBCLqHtQJk51U2nRgzbX2\n"
 "xrJQcXy+8YDrNBGOmNEZUppF1vg0Vm4wJeMWozDvu3eobwwasVsFGuPUKMj4rLcK\n"
 "gTcVC47rEOGD7dGZY93Z4mPkdwWJ72qiHn9fL/OBtTnM40CdE81Wavu0jWwBkYHh\n"
-"vP6UswJp7f5y/ptqpL17Wg8ccc//TBnEGOH27AF5gbwIfypwZbOEuJDTGR8r+g==\n"
-"-----END DH PARAMETERS-----\n";
+"vP6UswJp7f5y/ptqpL17Wg8ccc//TBnEGOH27AF5gbwIfypwZbOEuJDTGR8r+gId\n"
+"AIAcDTTFjZP+mXF3EB+AU1pHOM68vziambNjces=\n"
+"-----END X9.42 DH PARAMETERS-----\n";
 
 /* RFC 5114 IKE_id=24
 2.3.  2048-bit MODP Group with 256-bit Prime Order Subgroup
@@ -444,9 +452,12 @@ static const char dh_ike_23_pem[] =
    q = 8CF83642 A709A097 B4479976 40129DA2 99B1A47D 1EB3750B
        A308B0FE 64F5FBD3
 */
+/* OpenSSL 1.0.2j
+ * openssl genpkey -genparam -algorithm DH -outform PEM -pkeyopt dh_rfc5114:3
+ */
 static const char dh_ike_24_pem[] =
-"-----BEGIN DH PARAMETERS-----\n"
-"MIICCQKCAQEAh6jmHbS2Zjz/u9GcZRlZmYzu9ghmDdDyXSzu1ENeOwDgDfjx1hlX\n"
+"-----BEGIN X9.42 DH PARAMETERS-----\n"
+"MIICLAKCAQEAh6jmHbS2Zjz/u9GcZRlZmYzu9ghmDdDyXSzu1ENeOwDgDfjx1hlX\n"
 "1Pr330VhsqowFsPZETQJb6o79Cltgw6afCCeDGSXUXq9WoqdMGvPZ+2R+eZyW0dY\n"
 "wCLgse9Cdb97bFv8EdRfkIi5QfVOseWbuLw5oL8SMH9cT9twxYGyP3a2Osrhyqa3\n"
 "kC1SUmc1SIoO8TxtmlG/pKs62DR3llJNjvahZ7WkGCXZZ+FE5RQFZCUcysuD5rSG\n"
@@ -456,8 +467,10 @@ static const char dh_ike_24_pem[] =
 "+MKMuxilWuMTQQAKZQGW+THHelfy3fRj5ensFEt3feYqqrioYorDdtKC1u04ZOZ5\n"
 "gkKOvIMdFDSPby+Rk7UEWvJ2cWTh38lnwfs/LlWkvRv/6DucgNBSuYXRguoK2yo7\n"
 "cxPT/hTISEseBSWIubfSu9LfAWGZ7NBuFVfNCRWzNTu7ZODsN3/QKDcN+StSx4kU\n"
-"KM3GfrYYS1I9HbJGwy9jB4SQ8A741kfRSNR5VFFeIyfP75jFgmZLTA9sxBZZ\n"
-"-----END DH PARAMETERS-----\n";
+"KM3GfrYYS1I9HbJGwy9jB4SQ8A741kfRSNR5VFFeIyfP75jFgmZLTA9sxBZZAiEA\n"
+"jPg2QqcJoJe0R5l2QBKdopmxpH0es3ULowiw/mT1+9M=\n"
+"-----END X9.42 DH PARAMETERS-----\n";
+
 
 /* ------------------------------------------------------------------------- */
 /* RFC 7919 Published August 2016, so strength estimates date from then.
