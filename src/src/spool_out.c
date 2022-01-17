@@ -205,7 +205,7 @@ if (sender_host_auth_pubname)
 if (interface_address)
   {
   if (is_tainted(interface_address)) putc('-', fp);
-  fprintf(fp, "-interface_address %s.%d\n", interface_address, interface_port);
+  fprintf(fp, "-interface_address [%s]:%d\n", interface_address, interface_port);
   }
 
 if (smtp_active_hostname != primary_hostname)
