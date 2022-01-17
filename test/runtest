@@ -788,7 +788,11 @@ RESET_AFTER_EXTRA_LINE_READ:
   if (!/listening for SMTP on/ && !/Connecting to/ && !/=>/ && !/->/
       && !/\*>/&& !/==/  && !/\*\*/ && !/Connection refused/ && !/in response to/)
     {
-    s/\[([a-z\d:]+|\d+(?:\.\d+){3})\]:(\d+)/"[".$1."]:".new_value($2,"%s",\$next_port)/ie;
+    # [<ip-addr>]:<port>
+    # ip-addr: IPv4 like 1.2.3.4
+    #          IPv6 like dead:beef::1
+    #                    ::ffff:1.2.3.4 (v4mapped)
+    s/\[([a-f\d:.]+|\d+(?:.\d+){3})\]:(\d+)/new_value($2,"[$1]:%s",\$next_port)/ie;
     }
 
   # Port in host address in spool file output from -Mvh
