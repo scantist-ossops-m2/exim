@@ -182,6 +182,10 @@ JH/31 Fix CHUNKING code to properly flush the unwanted chunk after an error.
       Previously only that bufferd was discarded, resulting in SYMTP command
       desynchronisation.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.89
 -----------------
