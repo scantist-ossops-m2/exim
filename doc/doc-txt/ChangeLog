@@ -97,6 +97,10 @@ PP/08 Reduce a number of compilation warnings under clang; building with
       CC=clang CFLAGS+=-Wno-dangling-else -Wno-logical-op-parentheses
       should be warning-free.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.88
 -----------------
