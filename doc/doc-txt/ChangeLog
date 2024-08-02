@@ -104,6 +104,10 @@ JH/27 Fix a possible security hole, wherein a process operating with the Exim
       discovery and writeup.  Ubuntu bug 1580454; no bug raised against Exim
       itself :(
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.87
 -----------------
