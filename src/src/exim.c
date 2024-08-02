@@ -2704,7 +2704,14 @@ for (i = 1; i < argc; i++)
 
       /* -oMr: Received protocol */
 
-      else if (Ustrcmp(argrest, "Mr") == 0) received_protocol = argv[++i];
+      else if (Ustrcmp(argrest, "Mr") == 0)
+
+        if (received_protocol)
+          {
+          fprintf(stderr, "received_protocol is set already\n");
+          exit(EXIT_FAILURE);
+          }
+        else received_protocol = argv[++i];
 
       /* -oMs: Set sender host name */
 
@@ -2800,7 +2807,15 @@ for (i = 1; i < argc; i++)
 
     if (*argrest != 0)
       {
-      uschar *hn = Ustrchr(argrest, ':');
+      uschar *hn;
+
+      if (received_protocol)
+        {
+        fprintf(stderr, "received_protocol is set already\n");
+        exit(EXIT_FAILURE);
+        }
+
+      hn = Ustrchr(argrest, ':');
       if (hn == NULL)
         {
         received_protocol = argrest;
