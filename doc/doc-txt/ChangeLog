@@ -89,6 +89,10 @@ JH/16 Drop variables when they go out of scope.  Memory management drops a whole
       bug: a transport crash, where a dangling pointer for $sending_ip_address
       originally assigned in a verify callout, is re-used.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.88
 -----------------
