@@ -81,6 +81,10 @@ PP/04 Bug 2018: Also handle Proxy Protocol v2 safely.
 
 PP/05 FreeBSD compat: handle that Ports no longer create /usr/bin/perl
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.88
 -----------------
