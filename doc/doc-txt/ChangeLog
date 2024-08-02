@@ -165,6 +165,10 @@ JH/30 The (EXPERIMENTAL_DMARC) variable $dmarc_ar_header is withdrawn, being
 
 JH/31 Bug 2257: Fix pipe transport to not use a socket-only syscall.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.90
 -----------------
