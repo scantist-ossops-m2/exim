@@ -340,6 +340,10 @@ JH/48 Bug 1807: Fix ${extract } for the numeric/3-string case. While preparsing
       is unavailable so we cannot tell if this is a numbered or keyed
       extraction.  Accept either.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 
 Exim version 4.86
