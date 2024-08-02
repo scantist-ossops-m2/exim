@@ -196,6 +196,10 @@ HS/03 Malware Avast: Better match the Avast multiline protocol. Add
       denied, license issues). Other scanner errors (like decompression
       bombs) do not cause a paniclog entry.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.90
 -----------------
