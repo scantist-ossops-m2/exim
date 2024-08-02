@@ -113,6 +113,10 @@ JH/18 Bug 2061: Fix ${extract } corrupting an enclosing ${reduce }  $value.
 
 JH/19 Fix reference counting bug in routing-generated-address tracking.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.88
 -----------------
