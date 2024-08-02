@@ -58,6 +58,10 @@ JH/14 Bug 2174: A timeout on connect for a callout was also erroneously seen as
       was marked defer_ok.  Fix to keep the two timeout-detection methods
       separate.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.90
 -----------------
