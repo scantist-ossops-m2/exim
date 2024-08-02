@@ -126,6 +126,10 @@ JH/31 Fix longstanding bug with aborted TLS server connection handling.  Under
       change which nulled out the file handle after the fclose.
       
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.87
 -----------------
