@@ -3083,7 +3083,14 @@ for (i = 1; i < argc; i++)
 
       /* -oMr: Received protocol */
 
-      else if (Ustrcmp(argrest, "Mr") == 0) received_protocol = argv[++i];
+      else if (Ustrcmp(argrest, "Mr") == 0)
+
+        if (received_protocol)
+          {
+          fprintf(stderr, "received_protocol is set already\n");
+          exit(EXIT_FAILURE);
+          }
+        else received_protocol = argv[++i];
 
       /* -oMs: Set sender host name */
 
@@ -3179,7 +3186,15 @@ for (i = 1; i < argc; i++)
 
     if (*argrest != 0)
       {
-      uschar *hn = Ustrchr(argrest, ':');
+      uschar *hn;
+
+      if (received_protocol)
+        {
+        fprintf(stderr, "received_protocol is set already\n");
+        exit(EXIT_FAILURE);
+        }
+
+      hn = Ustrchr(argrest, ':');
       if (hn == NULL)
         {
         received_protocol = argrest;
@@ -4411,6 +4426,12 @@ if (msg_action_arg > 0 && msg_action != MSG_DELIVER && msg_action != MSG_LOAD)
   {
   int yield = EXIT_SUCCESS;
   set_process_info("acting on specified messages");
+
+  /* ACL definitions may be needed when removing a message (-Mrm) because
+  event_action gets expanded */
+
+  if (msg_action == MSG_REMOVE)
+    readconf_rest();
 
   if (!one_msg_action)
     {
