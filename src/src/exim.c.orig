@@ -1,8 +1,10 @@
+/* $Cambridge: exim/src/src/exim.c,v 1.71 2010/06/07 00:12:42 pdp Exp $ */
+
 /*************************************************
 *     Exim - an Internet mail transport agent    *
 *************************************************/
 
-/* Copyright (c) University of Cambridge 1995 - 2016 */
+/* Copyright (c) University of Cambridge 1995 - 2009 */
 /* See the file NOTICE for conditions of use and distribution. */
 
 
@@ -11,17 +13,6 @@ Also a few functions that don't naturally fit elsewhere. */
 
 
 #include "exim.h"
-
-#ifdef __GLIBC__
-# include <gnu/libc-version.h>
-#endif
-
-#ifdef USE_GNUTLS
-# include <gnutls/gnutls.h>
-# if GNUTLS_VERSION_NUMBER < 0x030103 && !defined(DISABLE_OCSP)
-#  define DISABLE_OCSP
-# endif
-#endif
 
 extern void init_lookup_list(void);
 
@@ -64,16 +55,6 @@ store_free(block);
 
 
 /*************************************************
-*         Enums for cmdline interface            *
-*************************************************/
-
-enum commandline_info { CMDINFO_NONE=0,
-  CMDINFO_HELP, CMDINFO_SIEVE, CMDINFO_DSCP };
-
-
-
-
-/*************************************************
 *  Compile regular expression and panic on fail  *
 *************************************************/
 
@@ -92,7 +73,7 @@ Returns:      pointer to the compiled pattern
 */
 
 const pcre *
-regex_must_compile(const uschar *pattern, BOOL caseless, BOOL use_malloc)
+regex_must_compile(uschar *pattern, BOOL caseless, BOOL use_malloc)
 {
 int offset;
 int options = PCRE_COPT;
@@ -104,7 +85,7 @@ if (use_malloc)
   pcre_free = function_store_free;
   }
 if (caseless) options |= PCRE_CASELESS;
-yield = pcre_compile(CCS pattern, options, (const char **)&error, &offset, NULL);
+yield = pcre_compile(CS pattern, options, (const char **)&error, &offset, NULL);
 pcre_malloc = function_store_get;
 pcre_free = function_dummy_free;
 if (yield == NULL)
@@ -135,11 +116,10 @@ Returns:      TRUE or FALSE
 */
 
 BOOL
-regex_match_and_setup(const pcre *re, const uschar *subject, int options, int setup)
+regex_match_and_setup(const pcre *re, uschar *subject, int options, int setup)
 {
 int ovector[3*(EXPAND_MAXN+1)];
-uschar * s = string_copy(subject);	/* de-constifying */
-int n = pcre_exec(re, NULL, CS s, Ustrlen(s), 0,
+int n = pcre_exec(re, NULL, CS subject, Ustrlen(subject), 0,
   PCRE_EOPT | options, ovector, sizeof(ovector)/sizeof(int));
 BOOL yield = n >= 0;
 if (n == 0) n = EXPAND_MAXN + 1;
@@ -149,42 +129,12 @@ if (yield)
   expand_nmax = (setup < 0)? 0 : setup + 1;
   for (nn = (setup < 0)? 0 : 2; nn < n*2; nn += 2)
     {
-    expand_nstring[expand_nmax] = s + ovector[nn];
+    expand_nstring[expand_nmax] = subject + ovector[nn];
     expand_nlength[expand_nmax++] = ovector[nn+1] - ovector[nn];
     }
   expand_nmax--;
   }
 return yield;
-}
-
-
-
-
-/*************************************************
-*            Set up processing details           *
-*************************************************/
-
-/* Save a text string for dumping when SIGUSR1 is received.
-Do checks for overruns.
-
-Arguments: format and arguments, as for printf()
-Returns:   nothing
-*/
-
-void
-set_process_info(const char *format, ...)
-{
-int len = sprintf(CS process_info, "%5d ", (int)getpid());
-va_list ap;
-va_start(ap, format);
-if (!string_vformat(process_info + len, PROCESS_INFO_SIZE - len - 2, format, ap))
-  Ustrcpy(process_info + len, "**** string overflowed buffer ****");
-len = Ustrlen(process_info);
-process_info[len+0] = '\n';
-process_info[len+1] = '\0';
-process_info_len = len + 1;
-DEBUG(D_process_info) debug_printf("set_process_info: %s", process_info);
-va_end(ap);
 }
 
 
@@ -199,8 +149,6 @@ what it is currently doing. It will only be used if the OS is capable of
 setting up a handler that causes automatic restarting of any system call
 that is in progress at the time.
 
-This function takes care to be signal-safe.
-
 Argument: the signal number (SIGUSR1)
 Returns:  nothing
 */
@@ -208,32 +156,10 @@ Returns:  nothing
 static void
 usr1_handler(int sig)
 {
-int fd;
-
-os_restarting_signal(sig, usr1_handler);
-
-fd = Uopen(process_log_path, O_APPEND|O_WRONLY, LOG_MODE);
-if (fd < 0)
-  {
-  /* If we are already running as the Exim user, try to create it in the
-  current process (assuming spool_directory exists). Otherwise, if we are
-  root, do the creation in an exim:exim subprocess. */
-
-  int euid = geteuid();
-  if (euid == exim_uid)
-    fd = Uopen(process_log_path, O_CREAT|O_APPEND|O_WRONLY, LOG_MODE);
-  else if (euid == root_uid)
-    fd = log_create_as_exim(process_log_path);
-  }
-
-/* If we are neither exim nor root, or if we failed to create the log file,
-give up. There is not much useful we can do with errors, since we don't want
-to disrupt whatever is going on outside the signal handler. */
-
-if (fd < 0) return;
-
-(void)write(fd, process_info, process_info_len);
-(void)close(fd);
+sig = sig;      /* Keep picky compilers happy */
+log_write(0, LOG_PROCESS, "%s", process_info);
+log_close_all();
+os_restarting_signal(SIGUSR1, usr1_handler);
 }
 
 
@@ -277,10 +203,6 @@ will wait for ever, so we panic in this instance. (There was a case of this
 when a bug in a function that calls milliwait() caused it to pass invalid data.
 That's when I added the check. :-)
 
-We assume it to be not worth sleeping for under 100us; this value will
-require revisiting as hardware advances.  This avoids the issue of
-a zero-valued timer setting meaning "never fire".
-
 Argument:  an itimerval structure containing the interval
 Returns:   nothing
 */
@@ -290,9 +212,6 @@ milliwait(struct itimerval *itval)
 {
 sigset_t sigmask;
 sigset_t old_sigmask;
-
-if (itval->it_value.tv_usec < 100 && itval->it_value.tv_sec == 0)
-  return;
 (void)sigemptyset(&sigmask);                           /* Empty mask */
 (void)sigaddset(&sigmask, SIGALRM);                    /* Add SIGALRM */
 (void)sigprocmask(SIG_BLOCK, &sigmask, &old_sigmask);  /* Block SIGALRM */
@@ -365,7 +284,7 @@ return 0;
 /* Exim uses a time + a pid to generate a unique identifier in two places: its
 message IDs, and in file names for maildir deliveries. Because some OS now
 re-use pids within the same second, sub-second times are now being used.
-However, for absolute certainty, we must ensure the clock has ticked before
+However, for absolute certaintly, we must ensure the clock has ticked before
 allowing the relevant process to complete. At the time of implementation of
 this code (February 2003), the speed of processors is such that the clock will
 invariably have ticked already by the time a process has done its job. This
@@ -415,17 +334,45 @@ if (exim_tvcmp(&now_tv, then_tv) <= 0)
     {
     if (!running_in_test_harness)
       {
-      debug_printf("tick check: " TIME_T_FMT ".%06lu " TIME_T_FMT ".%06lu\n",
-        then_tv->tv_sec, (long) then_tv->tv_usec,
-       	now_tv.tv_sec, (long) now_tv.tv_usec);
-      debug_printf("waiting " TIME_T_FMT ".%06lu\n",
-        itval.it_value.tv_sec, (long) itval.it_value.tv_usec);
+      debug_printf("tick check: %lu.%06lu %lu.%06lu\n",
+        then_tv->tv_sec, then_tv->tv_usec, now_tv.tv_sec, now_tv.tv_usec);
+      debug_printf("waiting %lu.%06lu\n", itval.it_value.tv_sec,
+        itval.it_value.tv_usec);
       }
     }
 
   milliwait(&itval);
   }
 }
+
+
+
+
+/*************************************************
+*            Set up processing details           *
+*************************************************/
+
+/* Save a text string for dumping when SIGUSR1 is received.
+Do checks for overruns.
+
+Arguments: format and arguments, as for printf()
+Returns:   nothing
+*/
+
+void
+set_process_info(char *format, ...)
+{
+int len;
+va_list ap;
+sprintf(CS process_info, "%5d ", (int)getpid());
+len = Ustrlen(process_info);
+va_start(ap, format);
+if (!string_vformat(process_info + len, PROCESS_INFO_SIZE - len, format, ap))
+  Ustrcpy(process_info + len, "**** string overflowed buffer ****");
+DEBUG(D_process_info) debug_printf("set_process_info: %s\n", process_info);
+va_end(ap);
+}
+
 
 
 
@@ -450,7 +397,7 @@ Returns:          the fopened FILE or NULL
 */
 
 FILE *
-modefopen(const uschar *filename, const char *options, mode_t mode)
+modefopen(uschar *filename, char *options, mode_t mode)
 {
 mode_t saved_umask = umask(0777);
 FILE *f = Ufopen(filename, options);
@@ -544,7 +491,7 @@ close_unwanted(void)
 if (smtp_input)
   {
   #ifdef SUPPORT_TLS
-  tls_close(TRUE, FALSE);      /* Shut down the TLS library */
+  tls_close(FALSE);      /* Shut down the TLS library */
   #endif
   (void)close(fileno(smtp_in));
   (void)close(fileno(smtp_out));
@@ -623,20 +570,17 @@ if (euid == root_uid || euid != uid || egid != gid || igflag)
 
 DEBUG(D_uid)
   {
-  int group_count, save_errno;
+  int group_count;
   gid_t group_list[NGROUPS_MAX];
   debug_printf("changed uid/gid: %s\n  uid=%ld gid=%ld pid=%ld\n", msg,
     (long int)geteuid(), (long int)getegid(), (long int)getpid());
   group_count = getgroups(NGROUPS_MAX, group_list);
-  save_errno = errno;
   debug_printf("  auxiliary group list:");
   if (group_count > 0)
     {
     int i;
     for (i = 0; i < group_count; i++) debug_printf(" %d", (int)group_list[i]);
     }
-  else if (group_count < 0)
-    debug_printf(" <error: %s>", strerror(save_errno));
   else debug_printf(" <none>");
   debug_printf("\n");
   }
@@ -753,8 +697,6 @@ Returns:    nothing
 static void
 show_whats_supported(FILE *f)
 {
-  auth_info *authi;
-
 #ifdef DB_VERSION_STRING
 fprintf(f, "Berkeley DB: %s\n", DB_VERSION_STRING);
 #elif defined(BTREEVERSION) && defined(HASHVERSION)
@@ -819,35 +761,8 @@ fprintf(f, "Support for:");
 #ifndef DISABLE_DKIM
   fprintf(f, " DKIM");
 #endif
-#ifndef DISABLE_DNSSEC
-  fprintf(f, " DNSSEC");
-#endif
-#ifndef DISABLE_EVENT
-  fprintf(f, " Event");
-#endif
-#ifdef SUPPORT_I18N
-  fprintf(f, " I18N");
-#endif
-#ifndef DISABLE_OCSP
-  fprintf(f, " OCSP");
-#endif
-#ifndef DISABLE_PRDR
-  fprintf(f, " PRDR");
-#endif
-#ifdef SUPPORT_PROXY
-  fprintf(f, " PROXY");
-#endif
-#ifdef SUPPORT_SOCKS
-  fprintf(f, " SOCKS");
-#endif
-#ifdef TCP_FASTOPEN
-  fprintf(f, " TCP_Fast_Open");
-#endif
-#ifdef EXPERIMENTAL_LMDB
-  fprintf(f, " Experimental_LMDB");
-#endif
-#ifdef EXPERIMENTAL_QUEUEFILE
-  fprintf(f, " Experimental_QUEUEFILE");
+#ifdef WITH_OLD_DEMIME
+  fprintf(f, " Old_Demime");
 #endif
 #ifdef EXPERIMENTAL_SPF
   fprintf(f, " Experimental_SPF");
@@ -858,17 +773,8 @@ fprintf(f, "Support for:");
 #ifdef EXPERIMENTAL_BRIGHTMAIL
   fprintf(f, " Experimental_Brightmail");
 #endif
-#ifdef EXPERIMENTAL_DANE
-  fprintf(f, " Experimental_DANE");
-#endif
 #ifdef EXPERIMENTAL_DCC
   fprintf(f, " Experimental_DCC");
-#endif
-#ifdef EXPERIMENTAL_DMARC
-  fprintf(f, " Experimental_DMARC");
-#endif
-#ifdef EXPERIMENTAL_DSN_INFO
-  fprintf(f, " Experimental_DSN_info");
 #endif
 fprintf(f, "\n");
 
@@ -880,7 +786,7 @@ fprintf(f, "Lookups (built-in):");
   fprintf(f, " cdb");
 #endif
 #if defined(LOOKUP_DBM) && LOOKUP_DBM!=2
-  fprintf(f, " dbm dbmjz dbmnz");
+  fprintf(f, " dbm dbmnz");
 #endif
 #if defined(LOOKUP_DNSDB) && LOOKUP_DNSDB!=2
   fprintf(f, " dnsdb");
@@ -893,9 +799,6 @@ fprintf(f, "Lookups (built-in):");
 #endif
 #if defined(LOOKUP_LDAP) && LOOKUP_LDAP!=2
   fprintf(f, " ldap ldapdn ldapm");
-#endif
-#ifdef EXPERIMENTAL_LMDB
-  fprintf(f, " lmdb");
 #endif
 #if defined(LOOKUP_MYSQL) && LOOKUP_MYSQL!=2
   fprintf(f, " mysql");
@@ -914,9 +817,6 @@ fprintf(f, "Lookups (built-in):");
 #endif
 #if defined(LOOKUP_PGSQL) && LOOKUP_PGSQL!=2
   fprintf(f, " pgsql");
-#endif
-#if defined(LOOKUP_REDIS) && LOOKUP_REDIS!=2
-  fprintf(f, " redis");
 #endif
 #if defined(LOOKUP_SQLITE) && LOOKUP_SQLITE!=2
   fprintf(f, " sqlite");
@@ -939,20 +839,11 @@ fprintf(f, "Authenticators:");
 #ifdef AUTH_DOVECOT
   fprintf(f, " dovecot");
 #endif
-#ifdef AUTH_GSASL
-  fprintf(f, " gsasl");
-#endif
-#ifdef AUTH_HEIMDAL_GSSAPI
-  fprintf(f, " heimdal_gssapi");
-#endif
 #ifdef AUTH_PLAINTEXT
   fprintf(f, " plaintext");
 #endif
 #ifdef AUTH_SPA
   fprintf(f, " spa");
-#endif
-#ifdef AUTH_TLS
-  fprintf(f, " tls");
 #endif
 fprintf(f, "\n");
 
@@ -1002,9 +893,6 @@ fprintf(f, "Transports:");
 #ifdef TRANSPORT_PIPE
   fprintf(f, " pipe");
 #endif
-#ifdef EXPERIMENTAL_QUEUEFILE
-  fprintf(f, " queuefile");
-#endif
 #ifdef TRANSPORT_SMTP
   fprintf(f, " smtp");
 #endif
@@ -1019,9 +907,15 @@ if (fixed_never_users[0] > 0)
   fprintf(f, "%d\n", (unsigned int)fixed_never_users[i]);
   }
 
-fprintf(f, "Configure owner: %d:%d\n", config_uid, config_gid);
-
 fprintf(f, "Size of off_t: " SIZE_T_FMT "\n", sizeof(off_t));
+
+/* This runtime check is to help diagnose library linkage mismatches which
+result in segfaults and the like; as such, it's left until the end,
+just in case.  There will still be a "Configuration file is" line still to
+come. */
+#ifdef SUPPORT_TLS
+tls_version_report(f);
+#endif
 
 /* Everything else is details which are only worth reporting when debugging.
 Perhaps the tls_version_report should move into this too. */
@@ -1029,109 +923,29 @@ DEBUG(D_any) do {
 
   int i;
 
-/* clang defines __GNUC__ (at least, for me) so test for it first */
-#if defined(__clang__)
-  fprintf(f, "Compiler: CLang [%s]\n", __clang_version__);
-#elif defined(__GNUC__)
-  fprintf(f, "Compiler: GCC [%s]\n",
-# ifdef __VERSION__
-      __VERSION__
-# else
-      "? unknown version ?"
-# endif
-      );
-#else
-  fprintf(f, "Compiler: <unknown>\n");
+#ifdef AUTH_CYRUS_SASL
+  auth_cyrus_sasl_version_report(f);
 #endif
 
-#ifdef __GLIBC__
-  fprintf(f, "Library version: Glibc: Compile: %d.%d\n",
-	       	__GLIBC__, __GLIBC_MINOR__);
-  if (__GLIBC_PREREQ(2, 1))
-    fprintf(f, "                        Runtime: %s\n",
-	       	gnu_get_libc_version());
-#endif
-
-#ifdef SUPPORT_TLS
-  tls_version_report(f);
-#endif
-#ifdef SUPPORT_I18N
-  utf8_version_report(f);
-#endif
-
-  for (authi = auths_available; *authi->driver_name != '\0'; ++authi)
-    if (authi->version_report)
-      (*authi->version_report)(f);
-
-  /* PCRE_PRERELEASE is either defined and empty or a bare sequence of
-  characters; unless it's an ancient version of PCRE in which case it
-  is not defined. */
-#ifndef PCRE_PRERELEASE
-# define PCRE_PRERELEASE
-#endif
-#define QUOTE(X) #X
-#define EXPAND_AND_QUOTE(X) QUOTE(X)
   fprintf(f, "Library version: PCRE: Compile: %d.%d%s\n"
              "                       Runtime: %s\n",
           PCRE_MAJOR, PCRE_MINOR,
-          EXPAND_AND_QUOTE(PCRE_PRERELEASE) "",
+          /* PRE_PRERELEASE is either defined and empty or a string.
+           * This should work: */
+          PCRE_PRERELEASE "",
           pcre_version());
-#undef QUOTE
-#undef EXPAND_AND_QUOTE
 
   init_lookup_list();
   for (i = 0; i < lookup_list_count; i++)
+    {
     if (lookup_list[i]->version_report)
       lookup_list[i]->version_report(f);
-
-#ifdef WHITELIST_D_MACROS
-  fprintf(f, "WHITELIST_D_MACROS: \"%s\"\n", WHITELIST_D_MACROS);
-#else
-  fprintf(f, "WHITELIST_D_MACROS unset\n");
-#endif
-#ifdef TRUSTED_CONFIG_LIST
-  fprintf(f, "TRUSTED_CONFIG_LIST: \"%s\"\n", TRUSTED_CONFIG_LIST);
-#else
-  fprintf(f, "TRUSTED_CONFIG_LIST unset\n");
-#endif
+    }
 
 } while (0);
 }
 
 
-/*************************************************
-*     Show auxiliary information about Exim      *
-*************************************************/
-
-static void
-show_exim_information(enum commandline_info request, FILE *stream)
-{
-const uschar **pp;
-
-switch(request)
-  {
-  case CMDINFO_NONE:
-    fprintf(stream, "Oops, something went wrong.\n");
-    return;
-  case CMDINFO_HELP:
-    fprintf(stream,
-"The -bI: flag takes a string indicating which information to provide.\n"
-"If the string is not recognised, you'll get this help (on stderr).\n"
-"\n"
-"  exim -bI:help    this information\n"
-"  exim -bI:dscp    dscp value keywords known\n"
-"  exim -bI:sieve   list of supported sieve extensions, one per line.\n"
-);
-    return;
-  case CMDINFO_SIEVE:
-    for (pp = exim_sieve_extension_list; *pp; ++pp)
-      fprintf(stream, "%s\n", *pp);
-    return;
-  case CMDINFO_DSCP:
-    dscp_list_to_stream(stream);
-    return;
-  }
-}
 
 
 /*************************************************
@@ -1163,23 +977,23 @@ for (t = lpart; !needs_quote && *t != 0; t++)
 if (!needs_quote) return lpart;
 
 size = ptr = 0;
-yield = string_catn(NULL, &size, &ptr, US"\"", 1);
+yield = string_cat(NULL, &size, &ptr, US"\"", 1);
 
 for (;;)
   {
   uschar *nq = US Ustrpbrk(lpart, "\\\"");
   if (nq == NULL)
     {
-    yield = string_cat(yield, &size, &ptr, lpart);
+    yield = string_cat(yield, &size, &ptr, lpart, Ustrlen(lpart));
     break;
     }
-  yield = string_catn(yield, &size, &ptr, lpart, nq - lpart);
-  yield = string_catn(yield, &size, &ptr, US"\\", 1);
-  yield = string_catn(yield, &size, &ptr, nq, 1);
+  yield = string_cat(yield, &size, &ptr, lpart, nq - lpart);
+  yield = string_cat(yield, &size, &ptr, US"\\", 1);
+  yield = string_cat(yield, &size, &ptr, nq, 1);
   lpart = nq + 1;
   }
 
-yield = string_catn(yield, &size, &ptr, US"\"", 1);
+yield = string_cat(yield, &size, &ptr, US"\"", 1);
 yield[ptr] = 0;
 return yield;
 }
@@ -1205,23 +1019,19 @@ Returns:            the dlopen handle or NULL on failure
 */
 
 static void *
-set_readline(char * (**fn_readline_ptr)(const char *),
-             void   (**fn_addhist_ptr)(const char *))
+set_readline(char * (**fn_readline_ptr)(char *),
+             char * (**fn_addhist_ptr)(char *))
 {
 void *dlhandle;
-void *dlhandle_curses = dlopen("libcurses." DYNLIB_FN_EXT, RTLD_GLOBAL|RTLD_LAZY);
+void *dlhandle_curses = dlopen("libcurses.so", RTLD_GLOBAL|RTLD_LAZY);
 
-dlhandle = dlopen("libreadline." DYNLIB_FN_EXT, RTLD_GLOBAL|RTLD_NOW);
+dlhandle = dlopen("libreadline.so", RTLD_GLOBAL|RTLD_NOW);
 if (dlhandle_curses != NULL) dlclose(dlhandle_curses);
 
 if (dlhandle != NULL)
   {
-  /* Checked manual pages; at least in GNU Readline 6.1, the prototypes are:
-   *   char * readline (const char *prompt);
-   *   void add_history (const char *string);
-   */
-  *fn_readline_ptr = (char *(*)(const char*))dlsym(dlhandle, "readline");
-  *fn_addhist_ptr = (void(*)(const char*))dlsym(dlhandle, "add_history");
+  *fn_readline_ptr = (char *(*)(char*))dlsym(dlhandle, "readline");
+  *fn_addhist_ptr = (char *(*)(char*))dlsym(dlhandle, "add_history");
   }
 else
   {
@@ -1251,7 +1061,7 @@ Returns:        pointer to dynamic memory, or NULL at end of file
 */
 
 static uschar *
-get_stdinput(char *(*fn_readline)(const char *), void(*fn_addhist)(const char *))
+get_stdinput(char *(*fn_readline)(char *), char *(*fn_addhist)(char *))
 {
 int i;
 int size = 0;
@@ -1293,16 +1103,15 @@ for (i = 0;; i++)
     while (p < ss && isspace(*p)) p++;   /* leading space after cont */
     }
 
-  yield = string_catn(yield, &size, &ptr, p, ss - p);
+  yield = string_cat(yield, &size, &ptr, p, ss - p);
 
   #ifdef USE_READLINE
   if (fn_readline != NULL) free(readline_line);
   #endif
 
-  /* yield can only be NULL if ss==p */
   if (ss == p || yield[ptr-1] != '\\')
     {
-    if (yield) yield[ptr] = 0;
+    yield[ptr] = 0;
     break;
     }
   yield[--ptr] = 0;
@@ -1331,7 +1140,7 @@ static void
 exim_usage(uschar *progname)
 {
 
-/* Handle specific program invocation variants */
+/* Handle specific program invocation varients */
 if (Ustrcmp(progname, US"-mailq") == 0)
   {
   fprintf(stderr,
@@ -1358,12 +1167,12 @@ exit(EXIT_FAILURE);
 /* Typically, Exim will drop privileges if macros are supplied.  In some
 cases, we want to not do so.
 
-Arguments:    opt_D_used - true if the commandline had a "-D" option
+Arguments:    none (macros is a global)
 Returns:      true if trusted, false otherwise
 */
 
 static BOOL
-macros_trusted(BOOL opt_D_used)
+macros_trusted(void)
 {
 #ifdef WHITELIST_D_MACROS
 macro_item *m;
@@ -1373,7 +1182,7 @@ size_t len;
 BOOL prev_char_item, found;
 #endif
 
-if (!opt_D_used)
+if (macros == NULL)
   return TRUE;
 #ifndef WHITELIST_D_MACROS
 return FALSE;
@@ -1430,9 +1239,8 @@ for (p = whitelisted, i = 0; (p != end) && (i < white_count); ++p)
   }
 whites[i] = NULL;
 
-/* The list of commandline macros should be very short.
-Accept the N*M complexity. */
-for (m = macros; m; m = m->next) if (m->command_line)
+/* The list of macros should be very short.  Accept the N*M complexity. */
+for (m = macros; m != NULL; m = m->next)
   {
   found = FALSE;
   for (w = whites; *w; ++w)
@@ -1457,7 +1265,7 @@ for (m = macros; m; m = m->next) if (m->command_line)
     return FALSE;
     }
   }
-DEBUG(D_any) debug_printf("macros_trusted overridden to true by whitelisting\n");
+debug_printf("macros_trusted overriden to true by whitelisting\n");
 return TRUE;
 #endif
 }
@@ -1511,18 +1319,14 @@ BOOL checking = FALSE;
 BOOL count_queue = FALSE;
 BOOL expansion_test = FALSE;
 BOOL extract_recipients = FALSE;
-BOOL flag_G = FALSE;
-BOOL flag_n = FALSE;
 BOOL forced_delivery = FALSE;
 BOOL f_end_dot = FALSE;
 BOOL deliver_give_up = FALSE;
 BOOL list_queue = FALSE;
 BOOL list_options = FALSE;
-BOOL list_config = FALSE;
 BOOL local_queue_only;
 BOOL more = TRUE;
 BOOL one_msg_action = FALSE;
-BOOL opt_D_used = FALSE;
 BOOL queue_only_set = FALSE;
 BOOL receiving_message = TRUE;
 BOOL sender_ident_set = FALSE;
@@ -1535,7 +1339,6 @@ BOOL verify_as_sender = FALSE;
 BOOL version_printed = FALSE;
 uschar *alias_arg = NULL;
 uschar *called_as = US"";
-uschar *cmdline_syslog_name = NULL;
 uschar *start_queue_run_id = NULL;
 uschar *stop_queue_run_id = NULL;
 uschar *expansion_test_message = NULL;
@@ -1543,11 +1346,9 @@ uschar *ftest_domain = NULL;
 uschar *ftest_localpart = NULL;
 uschar *ftest_prefix = NULL;
 uschar *ftest_suffix = NULL;
-uschar *log_oneline = NULL;
 uschar *malware_test_file = NULL;
 uschar *real_sender_address;
 uschar *originator_home = US"/";
-size_t sz;
 void *reset_point;
 
 struct passwd *pw;
@@ -1555,10 +1356,6 @@ struct stat statbuf;
 pid_t passed_qr_pid = (pid_t)0;
 int passed_qr_pipe = -1;
 gid_t group_list[NGROUPS_MAX];
-
-/* For the -bI: flag */
-enum commandline_info info_flag = CMDINFO_NONE;
-BOOL info_stdout = FALSE;
 
 /* Possible options for -R and -S */
 
@@ -1583,19 +1380,7 @@ if (route_finduser(US EXIM_USERNAME, &pw, &exim_uid))
       EXIM_USERNAME);
     exit(EXIT_FAILURE);
     }
-  /* If ref:name uses a number as the name, route_finduser() returns
-  TRUE with exim_uid set and pw coerced to NULL. */
-  if (pw)
-    exim_gid = pw->pw_gid;
-#ifndef EXIM_GROUPNAME
-  else
-    {
-    fprintf(stderr,
-        "exim: ref:name should specify a usercode, not a group.\n"
-        "exim: can't let you get away with it unless you also specify a group.\n");
-    exit(EXIT_FAILURE);
-    }
-#endif
+  exim_gid = pw->pw_gid;
   }
 else
   {
@@ -1636,9 +1421,8 @@ if (!route_findgroup(US CONFIGURE_GROUPNAME, &config_gid))
   }
 #endif
 
-/* In the Cygwin environment, some initialization used to need doing.
-It was fudged in by means of this macro; now no longer but we'll leave
-it in case of others. */
+/* In the Cygwin environment, some initialization needs doing. It is fudged
+in by means of this macro. */
 
 #ifdef OS_INIT
 OS_INIT
@@ -1664,15 +1448,12 @@ os_non_restarting_signal(SIGALRM, sigalrm_handler);
 /* Ensure we have a buffer for constructing log entries. Use malloc directly,
 because store_malloc writes a log entry on failure. */
 
-if (!(log_buffer = US malloc(LOG_BUFFER_SIZE)))
+log_buffer = (uschar *)malloc(LOG_BUFFER_SIZE);
+if (log_buffer == NULL)
   {
   fprintf(stderr, "exim: failed to get store for log buffer\n");
   exit(EXIT_FAILURE);
   }
-
-/* Initialize the default log options. */
-
-bits_set(log_selector, log_selector_size, log_default);
 
 /* Set log_stderr to stderr, provided that stderr exists. This gets reset to
 NULL when the daemon is run and the file is closed. We have to use this
@@ -1784,7 +1565,6 @@ regex_whitelisted_macro =
   regex_must_compile(US"^[A-Za-z0-9_/.-]*$", FALSE, TRUE);
 #endif
 
-for (i = 0; i < REGEX_VARS; i++) regex_vars[i] = NULL;
 
 /* If the program is called as "mailq" treat it as equivalent to "exim -bp";
 this seems to be a generally accepted convention, since one finds symbolic
@@ -1900,7 +1680,7 @@ for (i = 1; i < argc; i++)
     break;
     }
 
-  /* An option consisting of -- terminates the options */
+  /* An option consistion of -- terminates the options */
 
   if (Ustrcmp(arg, "--") == 0)
     {
@@ -1963,26 +1743,6 @@ for (i = 1; i < argc; i++)
 
   switch(switchchar)
     {
-
-    /* sendmail uses -Ac and -Am to control which .cf file is used;
-    we ignore them. */
-    case 'A':
-    if (*argrest == '\0') { badarg = TRUE; break; }
-    else
-      {
-      BOOL ignore = FALSE;
-      switch (*argrest)
-        {
-        case 'c':
-        case 'm':
-          if (*(argrest + 1) == '\0')
-            ignore = TRUE;
-          break;
-        }
-      if (!ignore) { badarg = TRUE; break; }
-      }
-    break;
-
     /* -Btype is a sendmail option for 7bit/8bit setting. Exim is 8-bit clean
     so has no need of it. */
 
@@ -2025,7 +1785,7 @@ for (i = 1; i < argc; i++)
 
     else if (*argrest == 'F')
       {
-      filter_test |= checking = FTEST_SYSTEM;
+      filter_test |= FTEST_SYSTEM;
       if (*(++argrest) != 0) { badarg = TRUE; break; }
       if (++i < argc) filter_test_sfile = argv[i]; else
         {
@@ -2045,7 +1805,7 @@ for (i = 1; i < argc; i++)
       {
       if (*(++argrest) == 0)
         {
-        filter_test |= checking = FTEST_USER;
+        filter_test |= FTEST_USER;
         if (++i < argc) filter_test_ufile = argv[i]; else
           {
           fprintf(stderr, "exim: file name expected after %s\n", argv[i-1]);
@@ -2075,7 +1835,6 @@ for (i = 1; i < argc; i++)
       sender_host_address = argv[i];
       host_checking = checking = log_testing_mode = TRUE;
       host_checking_callout = argrest[1] == 'c';
-      message_logs = FALSE;
       }
 
     /* -bi: This option is used by sendmail to initialize *the* alias file,
@@ -2084,32 +1843,6 @@ for (i = 1; i < argc; i++)
     sendmail this way, some support must be provided. */
 
     else if (Ustrcmp(argrest, "i") == 0) bi_option = TRUE;
-
-    /* -bI: provide information, of the type to follow after a colon.
-    This is an Exim flag. */
-
-    else if (argrest[0] == 'I' && Ustrlen(argrest) >= 2 && argrest[1] == ':')
-      {
-      uschar *p = &argrest[2];
-      info_flag = CMDINFO_HELP;
-      if (Ustrlen(p))
-        {
-        if (strcmpic(p, CUS"sieve") == 0)
-          {
-          info_flag = CMDINFO_SIEVE;
-          info_stdout = TRUE;
-          }
-        else if (strcmpic(p, CUS"dscp") == 0)
-          {
-          info_flag = CMDINFO_DSCP;
-          info_stdout = TRUE;
-          }
-        else if (strcmpic(p, CUS"help") == 0)
-          {
-          info_stdout = TRUE;
-          }
-        }
-      }
 
     /* -bm: Accept and deliver message - the default option. Reinstate
     receiving_message, which got turned off for all -b options. */
@@ -2121,7 +1854,6 @@ for (i = 1; i < argc; i++)
     else if (Ustrcmp(argrest, "malware") == 0)
       {
       if (++i >= argc) { badarg = TRUE; break; }
-      checking = TRUE;
       malware_test_file = argv[i];
       }
 
@@ -2184,26 +1916,15 @@ for (i = 1; i < argc; i++)
 
     else if (Ustrcmp(argrest, "P") == 0)
       {
-      /* -bP config: we need to setup here, because later,
-       * when list_options is checked, the config is read already */
-      if (argv[i+1] && Ustrcmp(argv[i+1], "config") == 0)
-        {
-        list_config = TRUE;
-        readconf_save_config(version_string);
-        }
-      else
-        {
-        list_options = TRUE;
-        debug_selector |= D_v;
-        debug_file = stderr;
-        }
+      list_options = TRUE;
+      debug_selector |= D_v;
+      debug_file = stderr;
       }
 
     /* -brt: Test retry configuration lookup */
 
     else if (Ustrcmp(argrest, "rt") == 0)
       {
-      checking = TRUE;
       test_retry_arg = i + 1;
       goto END_ARG;
       }
@@ -2212,7 +1933,6 @@ for (i = 1; i < argc; i++)
 
     else if (Ustrcmp(argrest, "rw") == 0)
       {
-      checking = TRUE;
       test_rewrite_arg = i + 1;
       goto END_ARG;
       }
@@ -2255,25 +1975,6 @@ for (i = 1; i < argc; i++)
       printf("%s\n", CS version_copyright);
       version_printed = TRUE;
       show_whats_supported(stdout);
-      log_testing_mode = TRUE;
-      }
-
-    /* -bw: inetd wait mode, accept a listening socket as stdin */
-
-    else if (*argrest == 'w')
-      {
-      inetd_wait_mode = TRUE;
-      background_daemon = FALSE;
-      daemon_listen = TRUE;
-      if (*(++argrest) != '\0')
-        {
-        inetd_wait_timeout = readconf_readtime(argrest, 0, FALSE);
-        if (inetd_wait_timeout <= 0)
-          {
-          fprintf(stderr, "exim: bad time value %s: abandoned\n", argv[i]);
-          exit(EXIT_FAILURE);
-          }
-        }
       }
 
     else badarg = TRUE;
@@ -2370,7 +2071,7 @@ for (i = 1; i < argc; i++)
               if (nr_configs)
                 {
                 int sep = 0;
-                const uschar *list = argrest;
+                uschar *list = argrest;
                 uschar *filename;
                 while (trusted_config && (filename = string_nextinlist(&list,
                         &sep, big_buffer, big_buffer_size)) != NULL)
@@ -2422,11 +2123,11 @@ for (i = 1; i < argc; i++)
     #else
       {
       int ptr = 0;
+      macro_item *mlast = NULL;
       macro_item *m;
       uschar name[24];
       uschar *s = argrest;
 
-      opt_D_used = TRUE;
       while (isspace(*s)) s++;
 
       if (*s < 'A' || *s > 'Z')
@@ -2450,14 +2151,22 @@ for (i = 1; i < argc; i++)
         while (isspace(*s)) s++;
         }
 
-      for (m = macros; m; m = m->next)
+      for (m = macros; m != NULL; m = m->next)
+        {
         if (Ustrcmp(m->name, name) == 0)
           {
           fprintf(stderr, "exim: duplicated -D in command line\n");
           exit(EXIT_FAILURE);
           }
+        mlast = m;
+        }
 
-      m = macro_create(name, s, TRUE, FALSE);
+      m = store_get(sizeof(macro_item) + Ustrlen(name));
+      m->next = NULL;
+      m->command_line = TRUE;
+      if (mlast == NULL) macros = m; else mlast->next = m;
+      Ustrcpy(m->name, name);
+      m->replacement = string_copy(s);
 
       if (clmacro_count >= MAX_CLMACROS)
         {
@@ -2494,8 +2203,8 @@ for (i = 1; i < argc; i++)
         argrest++;
         }
       if (*argrest != 0)
-        decode_bits(&selector, 1, debug_notall, argrest,
-          debug_options, debug_options_count, US"debug", 0);
+        decode_bits(&selector, NULL, D_memory, 0, argrest, debug_options,
+          debug_options_count, US"debug", 0);
       debug_selector = selector;
       }
     break;
@@ -2567,7 +2276,7 @@ for (i = 1; i < argc; i++)
 
     case 'f':
       {
-      int dummy_start, dummy_end;
+      int start, end;
       uschar *errmess;
       if (*argrest == 0)
         {
@@ -2575,7 +2284,9 @@ for (i = 1; i < argc; i++)
           { badarg = TRUE; break; }
         }
       if (*argrest == 0)
+        {
         sender_address = string_sprintf("");  /* Ensure writeable memory */
+        }
       else
         {
         uschar *temp = argrest + Ustrlen(argrest) - 1;
@@ -2583,15 +2294,8 @@ for (i = 1; i < argc; i++)
         if (temp >= argrest && *temp == '.') f_end_dot = TRUE;
         allow_domain_literals = TRUE;
         strip_trailing_dot = TRUE;
-#ifdef SUPPORT_I18N
-	allow_utf8_domains = TRUE;
-#endif
-        sender_address = parse_extract_address(argrest, &errmess,
-          &dummy_start, &dummy_end, &sender_address_domain, TRUE);
-#ifdef SUPPORT_I18N
-	message_smtputf8 =  string_is_utf8(sender_address);
-	allow_utf8_domains = FALSE;
-#endif
+        sender_address = parse_extract_address(argrest, &errmess, &start, &end,
+          &sender_address_domain, TRUE);
         allow_domain_literals = FALSE;
         strip_trailing_dot = FALSE;
         if (sender_address == NULL)
@@ -2604,13 +2308,9 @@ for (i = 1; i < argc; i++)
       }
     break;
 
-    /* -G: sendmail invocation to specify that it's a gateway submission and
-    sendmail may complain about problems instead of fixing them.
-    We make it equivalent to an ACL "control = suppress_local_fixups" and do
-    not at this time complain about problems. */
+    /* This is some Sendmail thing which can be ignored */
 
     case 'G':
-    flag_G = TRUE;
     break;
 
     /* -h: Set the hop count for an incoming message. Exim does not currently
@@ -2634,29 +2334,6 @@ for (i = 1; i < argc; i++)
     if (*argrest == 0) dot_ends = FALSE; else badarg = TRUE;
     break;
 
-
-    /* -L: set the identifier used for syslog; equivalent to setting
-    syslog_processname in the config file, but needs to be an admin option. */
-
-    case 'L':
-    if (*argrest == '\0')
-      {
-      if(++i < argc) argrest = argv[i]; else
-        { badarg = TRUE; break; }
-      }
-    sz = Ustrlen(argrest);
-    if (sz > 32)
-      {
-      fprintf(stderr, "exim: the -L syslog name is too long: \"%s\"\n", argrest);
-      return EXIT_FAILURE;
-      }
-    if (sz < 1)
-      {
-      fprintf(stderr, "exim: the -L syslog name is too short\n");
-      return EXIT_FAILURE;
-      }
-    cmdline_syslog_name = argrest;
-    break;
 
     case 'M':
     receiving_message = FALSE;
@@ -2725,63 +2402,58 @@ for (i = 1; i < argc; i++)
       break;
       }
 
-    else if (*argrest == 'C' && argrest[1] && !argrest[2])
-      {
-	switch(argrest[1])
-	{
     /* -MCA: set the smtp_authenticated flag; this is useful only when it
     precedes -MC (see above). The flag indicates that the host to which
     Exim is connected has accepted an AUTH sequence. */
 
-	case 'A': smtp_authenticated = TRUE; break;
-
-    /* -MCD: set the smtp_use_dsn flag; this indicates that the host
-       that exim is connected to supports the esmtp extension DSN */
-
-	case 'D': smtp_peer_options |= PEER_OFFERED_DSN; break;
-
-    /* -MCG: set the queue name, to a non-default value */
-
-	case 'G': if (++i < argc) queue_name = string_copy(argv[i]);
-		  else badarg = TRUE;
-		  break;
-
-    /* -MCK: the peer offered CHUNKING.  Must precede -MC */
-
-	case 'K': smtp_peer_options |= PEER_OFFERED_CHUNKING; break;
+    else if (Ustrcmp(argrest, "CA") == 0)
+      {
+      smtp_authenticated = TRUE;
+      break;
+      }
 
     /* -MCP: set the smtp_use_pipelining flag; this is useful only when
     it preceded -MC (see above) */
 
-	case 'P': smtp_peer_options |= PEER_OFFERED_PIPE; break;
+    else if (Ustrcmp(argrest, "CP") == 0)
+      {
+      smtp_use_pipelining = TRUE;
+      break;
+      }
 
     /* -MCQ: pass on the pid of the queue-running process that started
     this chain of deliveries and the fd of its synchronizing pipe; this
     is useful only when it precedes -MC (see above) */
 
-	case 'Q': if (++i < argc) passed_qr_pid = (pid_t)(Uatol(argv[i]));
-		  else badarg = TRUE;
-		  if (++i < argc) passed_qr_pipe = (int)(Uatol(argv[i]));
-		  else badarg = TRUE;
-		  break;
+    else if (Ustrcmp(argrest, "CQ") == 0)
+      {
+      if(++i < argc) passed_qr_pid = (pid_t)(Uatol(argv[i]));
+        else badarg = TRUE;
+      if(++i < argc) passed_qr_pipe = (int)(Uatol(argv[i]));
+        else badarg = TRUE;
+      break;
+      }
 
     /* -MCS: set the smtp_use_size flag; this is useful only when it
     precedes -MC (see above) */
 
-	case 'S': smtp_peer_options |= PEER_OFFERED_SIZE; break;
+    else if (Ustrcmp(argrest, "CS") == 0)
+      {
+      smtp_use_size = TRUE;
+      break;
+      }
 
-#ifdef SUPPORT_TLS
     /* -MCT: set the tls_offered flag; this is useful only when it
     precedes -MC (see above). The flag indicates that the host to which
     Exim is connected has offered TLS support. */
 
-	case 'T': smtp_peer_options |= PEER_OFFERED_TLS; break;
-#endif
-
-	default:  badarg = TRUE; break;
-	}
-	break;
+    #ifdef SUPPORT_TLS
+    else if (Ustrcmp(argrest, "CT") == 0)
+      {
+      tls_offered = TRUE;
+      break;
       }
+    #endif
 
     /* -M[x]: various operations on the following list of message ids:
        -M    deliver the messages, ignoring next retry times and thawing
@@ -2925,12 +2597,10 @@ for (i = 1; i < argc; i++)
     break;
 
 
-    /* -n: This means "don't alias" in sendmail, apparently.
-    For normal invocations, it has no effect.
-    It may affect some other options. */
+    /* -n: This means "don't alias" in sendmail, apparently. Just ignore
+    it. */
 
     case 'n':
-    flag_n = TRUE;
     break;
 
     /* -O: Just ignore it. In sendmail, apparently -O option=value means set
@@ -3073,33 +2743,9 @@ for (i = 1; i < argc; i++)
 
       else if (Ustrcmp(argrest, "Mi") == 0) interface_address = argv[++i];
 
-      /* -oMm: Message reference */
-
-      else if (Ustrcmp(argrest, "Mm") == 0)
-        {
-        if (!mac_ismsgid(argv[i+1]))
-          {
-            fprintf(stderr,"-oMm must be a valid message ID\n");
-            exit(EXIT_FAILURE);
-          }
-        if (!trusted_config)
-          {
-            fprintf(stderr,"-oMm must be called by a trusted user/config\n");
-            exit(EXIT_FAILURE);
-          }
-          message_reference = argv[++i];
-        }
-
       /* -oMr: Received protocol */
 
-      else if (Ustrcmp(argrest, "Mr") == 0)
-
-        if (received_protocol)
-          {
-          fprintf(stderr, "received_protocol is set already\n");
-          exit(EXIT_FAILURE);
-          }
-        else received_protocol = argv[++i];
+      else if (Ustrcmp(argrest, "Mr") == 0) received_protocol = argv[++i];
 
       /* -oMs: Set sender host name */
 
@@ -3195,25 +2841,14 @@ for (i = 1; i < argc; i++)
 
     if (*argrest != 0)
       {
-      uschar *hn;
-
-      if (received_protocol)
-        {
-        fprintf(stderr, "received_protocol is set already\n");
-        exit(EXIT_FAILURE);
-        }
-
-      hn = Ustrchr(argrest, ':');
+      uschar *hn = Ustrchr(argrest, ':');
       if (hn == NULL)
         {
         received_protocol = argrest;
         }
       else
         {
-	int old_pool = store_pool;
-	store_pool = POOL_PERM;
         received_protocol = string_copyn(argrest, hn - argrest);
-	store_pool = old_pool;
         sender_host_name = hn + 1;
         }
       }
@@ -3250,7 +2885,7 @@ for (i = 1; i < argc; i++)
     if (*argrest == 'f')
       {
       queue_run_force = TRUE;
-      if (*++argrest == 'f')
+      if (*(++argrest) == 'f')
         {
         deliver_force_thaw = TRUE;
         argrest++;
@@ -3265,19 +2900,8 @@ for (i = 1; i < argc; i++)
       argrest++;
       }
 
-    /* -q[f][f][l][G<name>]... Work on the named queue */
-
-    if (*argrest == 'G')
-      {
-      int i;
-      for (argrest++, i = 0; argrest[i] && argrest[i] != '/'; ) i++;
-      queue_name = string_copyn(argrest, i);
-      argrest += i;
-      if (*argrest == '/') argrest++;
-      }
-
-    /* -q[f][f][l][G<name>]: Run the queue, optionally forced, optionally local
-    only, optionally named, optionally starting from a given message id. */
+    /* -q[f][f][l]: Run the queue, optionally forced, optionally local only,
+    optionally starting from a given message id. */
 
     if (*argrest == 0 &&
         (i + 1 >= argc || argv[i+1][0] == '-' || mac_ismsgid(argv[i+1])))
@@ -3289,14 +2913,20 @@ for (i = 1; i < argc; i++)
         stop_queue_run_id = argv[++i];
       }
 
-    /* -q[f][f][l][G<name>/]<n>: Run the queue at regular intervals, optionally
-    forced, optionally local only, optionally named. */
+    /* -q[f][f][l]<n>: Run the queue at regular intervals, optionally forced,
+    optionally local only. */
 
-    else if ((queue_interval = readconf_readtime(*argrest ? argrest : argv[++i],
-						0, FALSE)) <= 0)
+    else
       {
-      fprintf(stderr, "exim: bad time value %s: abandoned\n", argv[i]);
-      exit(EXIT_FAILURE);
+      if (*argrest != 0)
+        queue_interval = readconf_readtime(argrest, 0, FALSE);
+      else
+        queue_interval = readconf_readtime(argv[++i], 0, FALSE);
+      if (queue_interval <= 0)
+        {
+        fprintf(stderr, "exim: bad time value %s: abandoned\n", argv[i]);
+        exit(EXIT_FAILURE);
+        }
       }
     break;
 
@@ -3316,7 +2946,8 @@ for (i = 1; i < argc; i++)
     if (*argrest != 0)
       {
       int i;
-      for (i = 0; i < nelem(rsopts); i++)
+      for (i = 0; i < sizeof(rsopts)/sizeof(uschar *); i++)
+        {
         if (Ustrcmp(argrest, rsopts[i]) == 0)
           {
           if (i != 2) queue_run_force = TRUE;
@@ -3324,20 +2955,21 @@ for (i = 1; i < argc; i++)
           if (i == 1 || i == 4) deliver_force_thaw = TRUE;
           argrest += Ustrlen(rsopts[i]);
           }
+        }
       }
 
     /* -R: Set string to match in addresses for forced queue run to
     pick out particular messages. */
 
-    if (*argrest)
-      deliver_selectstring = argrest;
-    else if (i+1 < argc)
-      deliver_selectstring = argv[++i];
-    else
+    if (*argrest == 0)
       {
-      fprintf(stderr, "exim: string expected after -R\n");
-      exit(EXIT_FAILURE);
+      if (i+1 < argc) deliver_selectstring = argv[++i]; else
+        {
+        fprintf(stderr, "exim: string expected after -R\n");
+        exit(EXIT_FAILURE);
+        }
       }
+    else deliver_selectstring = argrest;
     break;
 
 
@@ -3358,10 +2990,11 @@ for (i = 1; i < argc; i++)
     in all cases provided there are no further characters in this
     argument. */
 
-    if (*argrest)
+    if (*argrest != 0)
       {
       int i;
-      for (i = 0; i < nelem(rsopts); i++)
+      for (i = 0; i < sizeof(rsopts)/sizeof(uschar *); i++)
+        {
         if (Ustrcmp(argrest, rsopts[i]) == 0)
           {
           if (i != 2) queue_run_force = TRUE;
@@ -3369,20 +3002,21 @@ for (i = 1; i < argc; i++)
           if (i == 1 || i == 4) deliver_force_thaw = TRUE;
           argrest += Ustrlen(rsopts[i]);
           }
+        }
       }
 
     /* -S: Set string to match in addresses for forced queue run to
     pick out particular messages. */
 
-    if (*argrest)
-      deliver_selectstring_sender = argrest;
-    else if (i+1 < argc)
-      deliver_selectstring_sender = argv[++i];
-    else
+    if (*argrest == 0)
       {
-      fprintf(stderr, "exim: string expected after -S\n");
-      exit(EXIT_FAILURE);
+      if (i+1 < argc) deliver_selectstring_sender = argv[++i]; else
+        {
+        fprintf(stderr, "exim: string expected after -S\n");
+        exit(EXIT_FAILURE);
+        }
       }
+    else deliver_selectstring_sender = argrest;
     break;
 
     /* -Tqt is an option that is exclusively for use by the testing suite.
@@ -3414,7 +3048,7 @@ for (i = 1; i < argc; i++)
     /* -tls-on-connect: don't wait for STARTTLS (for old clients) */
 
     #ifdef SUPPORT_TLS
-    else if (Ustrcmp(argrest, "ls-on-connect") == 0) tls_in.on_connect = TRUE;
+    else if (Ustrcmp(argrest, "ls-on-connect") == 0) tls_on_connect = TRUE;
     #endif
 
     else badarg = TRUE;
@@ -3455,27 +3089,6 @@ for (i = 1; i < argc; i++)
     if (*argrest != 0) badarg = TRUE;
     break;
 
-    /* -X: in sendmail: takes one parameter, logfile, and sends debugging
-    logs to that file.  We swallow the parameter and otherwise ignore it. */
-
-    case 'X':
-    if (*argrest == '\0')
-      if (++i >= argc)
-        {
-        fprintf(stderr, "exim: string expected after -X\n");
-        exit(EXIT_FAILURE);
-        }
-    break;
-
-    case 'z':
-    if (*argrest == '\0')
-      if (++i < argc) log_oneline = argv[i]; else
-        {
-        fprintf(stderr, "exim: file name expected after %s\n", argv[i-1]);
-        exit(EXIT_FAILURE);
-        }
-    break;
-
     /* All other initial characters are errors */
 
     default:
@@ -3496,9 +3109,8 @@ for (i = 1; i < argc; i++)
 
 /* If -R or -S have been specified without -q, assume a single queue run. */
 
-if (  (deliver_selectstring || deliver_selectstring_sender)
-   && queue_interval < 0)
-    queue_interval = 0;
+if ((deliver_selectstring != NULL || deliver_selectstring_sender != NULL) &&
+  queue_interval < 0) queue_interval = 0;
 
 
 END_ARG:
@@ -3514,20 +3126,17 @@ if ((
     ) ||
     (
     msg_action_arg > 0 &&
-    (daemon_listen || queue_interval > 0 || list_options ||
+    (daemon_listen || queue_interval >= 0 || list_options ||
       (checking && msg_action != MSG_LOAD) ||
       bi_option || test_retry_arg >= 0 || test_rewrite_arg >= 0)
     ) ||
     (
-    (daemon_listen || queue_interval > 0) &&
+    (daemon_listen || queue_interval >= 0) &&
     (sender_address != NULL || list_options || list_queue || checking ||
       bi_option)
     ) ||
     (
     daemon_listen && queue_interval == 0
-    ) ||
-    (
-    inetd_wait_mode && queue_interval >= 0
     ) ||
     (
     list_options &&
@@ -3656,11 +3265,6 @@ till after reading the config, which might specify the exim gid. Therefore,
 save the group list here first. */
 
 group_count = getgroups(NGROUPS_MAX, group_list);
-if (group_count < 0)
-  {
-  fprintf(stderr, "exim: getgroups() failed: %s\n", strerror(errno));
-  exit(EXIT_FAILURE);
-  }
 
 /* There is a fundamental difference in some BSD systems in the matter of
 groups. FreeBSD and BSDI are known to be different; NetBSD and OpenBSD are
@@ -3706,7 +3310,7 @@ configuration file changes and macro definitions haven't happened. */
 
 if ((                                            /* EITHER */
     (!trusted_config ||                          /* Config changed, or */
-     !macros_trusted(opt_D_used)) &&		 /*  impermissible macros and */
+     !macros_trusted()) &&                       /*  impermissible macros and */
     real_uid != root_uid &&                      /* Not root, and */
     !running_in_test_harness                     /* Not fudged */
     ) ||                                         /*   OR   */
@@ -3723,13 +3327,9 @@ if ((                                            /* EITHER */
   and should be used for any logging information because attempts to write
   to the log will usually fail. To arrange this, we unset really_exim. However,
   if no stderr is available there is no point - we might as well have a go
-  at the log (if it fails, syslog will be written).
+  at the log (if it fails, syslog will be written). */
 
-  Note that if the invoker is Exim, the logs remain available. Messing with
-  this causes unlogged successful deliveries.  */
-
-  if ((log_stderr != NULL) && (real_uid != exim_uid))
-    really_exim = FALSE;
+  if (log_stderr != NULL) really_exim = FALSE;
   }
 
 /* Privilege is to be retained for the moment. It may be dropped later,
@@ -3764,59 +3364,292 @@ if ((filter_test & FTEST_USER) != 0)
     }
   }
 
-/* Initialise lookup_list
-If debugging, already called above via version reporting.
-In either case, we initialise the list of available lookups while running
-as root.  All dynamically modules are loaded from a directory which is
-hard-coded into the binary and is code which, if not a module, would be
-part of Exim already.  Ability to modify the content of the directory
-is equivalent to the ability to modify a setuid binary!
-
-This needs to happen before we read the main configuration. */
-init_lookup_list();
-
-#ifdef SUPPORT_I18N
-if (running_in_test_harness) smtputf8_advertise_hosts = NULL;
-#endif
-
 /* Read the main runtime configuration data; this gives up if there
 is a failure. It leaves the configuration file open so that the subsequent
-configuration data for delivery can be read if needed.
+configuration data for delivery can be read if needed. */
 
-NOTE: immediatly after opening the configuration file we change the working
-directory to "/"! Later we change to $spool_directory. We do it there, because
-during readconf_main() some expansion takes place already. */
+readconf_main();
 
-/* Store the initial cwd before we change directories */
-if ((initial_cwd = os_getcwd(NULL, 0)) == NULL)
+/* Handle the decoding of logging options. */
+
+decode_bits(&log_write_selector, &log_extra_selector, 0, 0,
+  log_selector_string, log_options, log_options_count, US"log", 0);
+
+DEBUG(D_any)
   {
-  perror("exim: can't get the current working directory");
-  exit(EXIT_FAILURE);
+  debug_printf("configuration file is %s\n", config_main_filename);
+  debug_printf("log selectors = %08x %08x\n", log_write_selector,
+    log_extra_selector);
   }
 
-/* checking:
-    -be[m] expansion test        -
-    -b[fF] filter test           new
-    -bh[c] host test             -
-    -bmalware malware_test_file  new
-    -brt   retry test            new
-    -brw   rewrite test          new
-    -bt    address test          -
-    -bv[s] address verify        -
-   list_options:
-    -bP <option> (except -bP config, which sets list_config)
+/* If domain literals are not allowed, check the sender address that was
+supplied with -f. Ditto for a stripped trailing dot. */
 
-If any of these options is set, we suppress warnings about configuration
-issues (currently about tls_advertise_hosts and keep_environment not being
-defined) */
+if (sender_address != NULL)
+  {
+  if (sender_address[sender_address_domain] == '[' && !allow_domain_literals)
+    {
+    fprintf(stderr, "exim: bad -f address \"%s\": domain literals not "
+      "allowed\n", sender_address);
+    return EXIT_FAILURE;
+    }
+  if (f_end_dot && !strip_trailing_dot)
+    {
+    fprintf(stderr, "exim: bad -f address \"%s.\": domain is malformed "
+      "(trailing dot not allowed)\n", sender_address);
+    return EXIT_FAILURE;
+    }
+  }
 
-readconf_main(checking || list_options);
+/* Paranoia check of maximum lengths of certain strings. There is a check
+on the length of the log file path in log.c, which will come into effect
+if there are any calls to write the log earlier than this. However, if we
+get this far but the string is very long, it is better to stop now than to
+carry on and (e.g.) receive a message and then have to collapse. The call to
+log_write() from here will cause the ultimate panic collapse if the complete
+file name exceeds the buffer length. */
 
-/* Now in directory "/" */
+if (Ustrlen(log_file_path) > 200)
+  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
+    "log_file_path is longer than 200 chars: aborting");
 
-if (cleanup_environment() == FALSE)
-  log_write(0, LOG_PANIC_DIE, "Can't cleanup environment");
+if (Ustrlen(pid_file_path) > 200)
+  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
+    "pid_file_path is longer than 200 chars: aborting");
 
+if (Ustrlen(spool_directory) > 200)
+  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
+    "spool_directory is longer than 200 chars: aborting");
+
+/* Length check on the process name given to syslog for its TAG field,
+which is only permitted to be 32 characters or less. See RFC 3164. */
+
+if (Ustrlen(syslog_processname) > 32)
+  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
+    "syslog_processname is longer than 32 chars: aborting");
+
+/* In some operating systems, the environment variable TMPDIR controls where
+temporary files are created; Exim doesn't use these (apart from when delivering
+to MBX mailboxes), but called libraries such as DBM libraries may require them.
+If TMPDIR is found in the environment, reset it to the value defined in the
+TMPDIR macro, if this macro is defined. */
+
+#ifdef TMPDIR
+  {
+  uschar **p;
+  for (p = USS environ; *p != NULL; p++)
+    {
+    if (Ustrncmp(*p, "TMPDIR=", 7) == 0 &&
+        Ustrcmp(*p+7, TMPDIR) != 0)
+      {
+      uschar *newp = malloc(Ustrlen(TMPDIR) + 8);
+      sprintf(CS newp, "TMPDIR=%s", TMPDIR);
+      *p = newp;
+      DEBUG(D_any) debug_printf("reset TMPDIR=%s in environment\n", TMPDIR);
+      }
+    }
+  }
+#endif
+
+/* Timezone handling. If timezone_string is "utc", set a flag to cause all
+timestamps to be in UTC (gmtime() is used instead of localtime()). Otherwise,
+we may need to get rid of a bogus timezone setting. This can arise when Exim is
+called by a user who has set the TZ variable. This then affects the timestamps
+in log files and in Received: headers, and any created Date: header lines. The
+required timezone is settable in the configuration file, so nothing can be done
+about this earlier - but hopefully nothing will normally be logged earlier than
+this. We have to make a new environment if TZ is wrong, but don't bother if
+timestamps_utc is set, because then all times are in UTC anyway. */
+
+if (timezone_string != NULL && strcmpic(timezone_string, US"UTC") == 0)
+  {
+  timestamps_utc = TRUE;
+  }
+else
+  {
+  uschar *envtz = US getenv("TZ");
+  if ((envtz == NULL && timezone_string != NULL) ||
+      (envtz != NULL &&
+        (timezone_string == NULL ||
+         Ustrcmp(timezone_string, envtz) != 0)))
+    {
+    uschar **p = USS environ;
+    uschar **new;
+    uschar **newp;
+    int count = 0;
+    while (*p++ != NULL) count++;
+    if (envtz == NULL) count++;
+    newp = new = malloc(sizeof(uschar *) * (count + 1));
+    for (p = USS environ; *p != NULL; p++)
+      {
+      if (Ustrncmp(*p, "TZ=", 3) == 0) continue;
+      *newp++ = *p;
+      }
+    if (timezone_string != NULL)
+      {
+      *newp = malloc(Ustrlen(timezone_string) + 4);
+      sprintf(CS *newp++, "TZ=%s", timezone_string);
+      }
+    *newp = NULL;
+    environ = CSS new;
+    tzset();
+    DEBUG(D_any) debug_printf("Reset TZ to %s: time is %s\n", timezone_string,
+      tod_stamp(tod_log));
+    }
+  }
+
+/* Handle the case when we have removed the setuid privilege because of -C or
+-D. This means that the caller of Exim was not root.
+
+There is a problem if we were running as the Exim user. The sysadmin may
+expect this case to retain privilege because "the binary was called by the
+Exim user", but it hasn't, because either the -D option set macros, or the
+-C option set a non-trusted configuration file. There are two possibilities:
+
+  (1) If deliver_drop_privilege is set, Exim is not going to re-exec in order
+      to do message deliveries. Thus, the fact that it is running as a
+      non-privileged user is plausible, and might be wanted in some special
+      configurations. However, really_exim will have been set false when
+      privilege was dropped, to stop Exim trying to write to its normal log
+      files. Therefore, re-enable normal log processing, assuming the sysadmin
+      has set up the log directory correctly.
+
+  (2) If deliver_drop_privilege is not set, the configuration won't work as
+      apparently intended, and so we log a panic message. In order to retain
+      root for -C or -D, the caller must either be root or be invoking a
+      trusted configuration file (when deliver_drop_privilege is false). */
+
+if (removed_privilege && (!trusted_config || macros != NULL) &&
+    real_uid == exim_uid)
+  {
+  if (deliver_drop_privilege)
+    really_exim = TRUE; /* let logging work normally */
+  else
+    log_write(0, LOG_MAIN|LOG_PANIC,
+      "exim user lost privilege for using %s option",
+      trusted_config? "-D" : "-C");
+  }
+
+/* Start up Perl interpreter if Perl support is configured and there is a
+perl_startup option, and the configuration or the command line specifies
+initializing starting. Note that the global variables are actually called
+opt_perl_xxx to avoid clashing with perl's namespace (perl_*). */
+
+#ifdef EXIM_PERL
+if (perl_start_option != 0)
+  opt_perl_at_start = (perl_start_option > 0);
+if (opt_perl_at_start && opt_perl_startup != NULL)
+  {
+  uschar *errstr;
+  DEBUG(D_any) debug_printf("Starting Perl interpreter\n");
+  errstr = init_perl(opt_perl_startup);
+  if (errstr != NULL)
+    {
+    fprintf(stderr, "exim: error in perl_startup code: %s\n", errstr);
+    return EXIT_FAILURE;
+    }
+  opt_perl_started = TRUE;
+  }
+#endif /* EXIM_PERL */
+
+/* Initialise lookup_list
+If debugging, already called above via version reporting.
+This does mean that debugging causes the list to be initialised while root.
+This *should* be harmless -- all modules are loaded from a fixed dir and
+it's code that would, if not a module, be part of Exim already. */
+init_lookup_list();
+
+/* Log the arguments of the call if the configuration file said so. This is
+a debugging feature for finding out what arguments certain MUAs actually use.
+Don't attempt it if logging is disabled, or if listing variables or if
+verifying/testing addresses or expansions. */
+
+if (((debug_selector & D_any) != 0 || (log_extra_selector & LX_arguments) != 0)
+      && really_exim && !list_options && !checking)
+  {
+  int i;
+  uschar *p = big_buffer;
+  Ustrcpy(p, "cwd=");
+  (void)getcwd(CS p+4, big_buffer_size - 4);
+  while (*p) p++;
+  (void)string_format(p, big_buffer_size - (p - big_buffer), " %d args:", argc);
+  while (*p) p++;
+  for (i = 0; i < argc; i++)
+    {
+    int len = Ustrlen(argv[i]);
+    uschar *printing;
+    uschar *quote;
+    if (p + len + 8 >= big_buffer + big_buffer_size)
+      {
+      Ustrcpy(p, " ...");
+      log_write(0, LOG_MAIN, "%s", big_buffer);
+      Ustrcpy(big_buffer, "...");
+      p = big_buffer + 3;
+      }
+    printing = string_printing(argv[i]);
+    if (printing[0] == 0) quote = US"\""; else
+      {
+      uschar *pp = printing;
+      quote = US"";
+      while (*pp != 0) if (isspace(*pp++)) { quote = US"\""; break; }
+      }
+    sprintf(CS p, " %s%.*s%s", quote, (int)(big_buffer_size -
+      (p - big_buffer) - 4), printing, quote);
+    while (*p) p++;
+    }
+
+  if ((log_extra_selector & LX_arguments) != 0)
+    log_write(0, LOG_MAIN, "%s", big_buffer);
+  else
+    debug_printf("%s\n", big_buffer);
+  }
+
+/* Set the working directory to be the top-level spool directory. We don't rely
+on this in the code, which always uses fully qualified names, but it's useful
+for core dumps etc. Don't complain if it fails - the spool directory might not
+be generally accessible and calls with the -C option (and others) have lost
+privilege by now. Before the chdir, we try to ensure that the directory exists.
+*/
+
+if (Uchdir(spool_directory) != 0)
+  {
+  (void)directory_make(spool_directory, US"", SPOOL_DIRECTORY_MODE, FALSE);
+  (void)Uchdir(spool_directory);
+  }
+
+/* Handle calls with the -bi option. This is a sendmail option to rebuild *the*
+alias file. Exim doesn't have such a concept, but this call is screwed into
+Sun's YP makefiles. Handle this by calling a configured script, as the real
+user who called Exim. The -oA option can be used to pass an argument to the
+script. */
+
+if (bi_option)
+  {
+  (void)fclose(config_file);
+  if (bi_command != NULL)
+    {
+    int i = 0;
+    uschar *argv[3];
+    argv[i++] = bi_command;
+    if (alias_arg != NULL) argv[i++] = alias_arg;
+    argv[i++] = NULL;
+
+    setgroups(group_count, group_list);
+    exim_setugid(real_uid, real_gid, FALSE, US"running bi_command");
+
+    DEBUG(D_exec) debug_printf("exec %.256s %.256s\n", argv[0],
+      (argv[1] == NULL)? US"" : argv[1]);
+
+    execv(CS argv[0], (char *const *)argv);
+    fprintf(stderr, "exim: exec failed: %s\n", strerror(errno));
+    exit(EXIT_FAILURE);
+    }
+  else
+    {
+    DEBUG(D_any) debug_printf("-bi used but bi_command not set; exiting\n");
+    exit(EXIT_SUCCESS);
+    }
+  }
 
 /* If an action on specific messages is requested, or if a daemon or queue
 runner is being started, we need to know if Exim was called by an admin user.
@@ -3878,311 +3711,6 @@ else
     }
   }
 
-/* Handle the decoding of logging options. */
-
-decode_bits(log_selector, log_selector_size, log_notall,
-  log_selector_string, log_options, log_options_count, US"log", 0);
-
-DEBUG(D_any)
-  {
-  int i;
-  debug_printf("configuration file is %s\n", config_main_filename);
-  debug_printf("log selectors =");
-  for (i = 0; i < log_selector_size; i++)
-    debug_printf(" %08x", log_selector[i]);
-  debug_printf("\n");
-  }
-
-/* If domain literals are not allowed, check the sender address that was
-supplied with -f. Ditto for a stripped trailing dot. */
-
-if (sender_address != NULL)
-  {
-  if (sender_address[sender_address_domain] == '[' && !allow_domain_literals)
-    {
-    fprintf(stderr, "exim: bad -f address \"%s\": domain literals not "
-      "allowed\n", sender_address);
-    return EXIT_FAILURE;
-    }
-  if (f_end_dot && !strip_trailing_dot)
-    {
-    fprintf(stderr, "exim: bad -f address \"%s.\": domain is malformed "
-      "(trailing dot not allowed)\n", sender_address);
-    return EXIT_FAILURE;
-    }
-  }
-
-/* See if an admin user overrode our logging. */
-
-if (cmdline_syslog_name != NULL)
-  {
-  if (admin_user)
-    {
-    syslog_processname = cmdline_syslog_name;
-    log_file_path = string_copy(CUS"syslog");
-    }
-  else
-    {
-    /* not a panic, non-privileged users should not be able to spam paniclog */
-    fprintf(stderr,
-        "exim: you lack sufficient privilege to specify syslog process name\n");
-    return EXIT_FAILURE;
-    }
-  }
-
-/* Paranoia check of maximum lengths of certain strings. There is a check
-on the length of the log file path in log.c, which will come into effect
-if there are any calls to write the log earlier than this. However, if we
-get this far but the string is very long, it is better to stop now than to
-carry on and (e.g.) receive a message and then have to collapse. The call to
-log_write() from here will cause the ultimate panic collapse if the complete
-file name exceeds the buffer length. */
-
-if (Ustrlen(log_file_path) > 200)
-  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
-    "log_file_path is longer than 200 chars: aborting");
-
-if (Ustrlen(pid_file_path) > 200)
-  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
-    "pid_file_path is longer than 200 chars: aborting");
-
-if (Ustrlen(spool_directory) > 200)
-  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
-    "spool_directory is longer than 200 chars: aborting");
-
-/* Length check on the process name given to syslog for its TAG field,
-which is only permitted to be 32 characters or less. See RFC 3164. */
-
-if (Ustrlen(syslog_processname) > 32)
-  log_write(0, LOG_MAIN|LOG_PANIC_DIE,
-    "syslog_processname is longer than 32 chars: aborting");
-
-if (log_oneline)
-  if (admin_user)
-    {
-    log_write(0, LOG_MAIN, "%s", log_oneline);
-    return EXIT_SUCCESS;
-    }
-  else
-    return EXIT_FAILURE;
-
-/* In some operating systems, the environment variable TMPDIR controls where
-temporary files are created; Exim doesn't use these (apart from when delivering
-to MBX mailboxes), but called libraries such as DBM libraries may require them.
-If TMPDIR is found in the environment, reset it to the value defined in the
-EXIM_TMPDIR macro, if this macro is defined.  For backward compatibility this
-macro may be called TMPDIR in old "Local/Makefile"s. It's converted to
-EXIM_TMPDIR by the build scripts.
-*/
-
-#ifdef EXIM_TMPDIR
-  {
-  uschar **p;
-  if (environ) for (p = USS environ; *p; p++)
-    if (Ustrncmp(*p, "TMPDIR=", 7) == 0 && Ustrcmp(*p+7, EXIM_TMPDIR) != 0)
-      {
-      uschar * newp = store_malloc(Ustrlen(EXIM_TMPDIR) + 8);
-      sprintf(CS newp, "TMPDIR=%s", EXIM_TMPDIR);
-      *p = newp;
-      DEBUG(D_any) debug_printf("reset TMPDIR=%s in environment\n", EXIM_TMPDIR);
-      }
-  }
-#endif
-
-/* Timezone handling. If timezone_string is "utc", set a flag to cause all
-timestamps to be in UTC (gmtime() is used instead of localtime()). Otherwise,
-we may need to get rid of a bogus timezone setting. This can arise when Exim is
-called by a user who has set the TZ variable. This then affects the timestamps
-in log files and in Received: headers, and any created Date: header lines. The
-required timezone is settable in the configuration file, so nothing can be done
-about this earlier - but hopefully nothing will normally be logged earlier than
-this. We have to make a new environment if TZ is wrong, but don't bother if
-timestamps_utc is set, because then all times are in UTC anyway. */
-
-if (timezone_string && strcmpic(timezone_string, US"UTC") == 0)
-  timestamps_utc = TRUE;
-else
-  {
-  uschar *envtz = US getenv("TZ");
-  if (envtz
-      ? !timezone_string || Ustrcmp(timezone_string, envtz) != 0
-      : timezone_string != NULL
-     )
-    {
-    uschar **p = USS environ;
-    uschar **new;
-    uschar **newp;
-    int count = 0;
-    if (environ) while (*p++) count++;
-    if (!envtz) count++;
-    newp = new = store_malloc(sizeof(uschar *) * (count + 1));
-    if (environ) for (p = USS environ; *p; p++)
-      if (Ustrncmp(*p, "TZ=", 3) != 0) *newp++ = *p;
-    if (timezone_string)
-      {
-      *newp = store_malloc(Ustrlen(timezone_string) + 4);
-      sprintf(CS *newp++, "TZ=%s", timezone_string);
-      }
-    *newp = NULL;
-    environ = CSS new;
-    tzset();
-    DEBUG(D_any) debug_printf("Reset TZ to %s: time is %s\n", timezone_string,
-      tod_stamp(tod_log));
-    }
-  }
-
-/* Handle the case when we have removed the setuid privilege because of -C or
--D. This means that the caller of Exim was not root.
-
-There is a problem if we were running as the Exim user. The sysadmin may
-expect this case to retain privilege because "the binary was called by the
-Exim user", but it hasn't, because either the -D option set macros, or the
--C option set a non-trusted configuration file. There are two possibilities:
-
-  (1) If deliver_drop_privilege is set, Exim is not going to re-exec in order
-      to do message deliveries. Thus, the fact that it is running as a
-      non-privileged user is plausible, and might be wanted in some special
-      configurations. However, really_exim will have been set false when
-      privilege was dropped, to stop Exim trying to write to its normal log
-      files. Therefore, re-enable normal log processing, assuming the sysadmin
-      has set up the log directory correctly.
-
-  (2) If deliver_drop_privilege is not set, the configuration won't work as
-      apparently intended, and so we log a panic message. In order to retain
-      root for -C or -D, the caller must either be root or be invoking a
-      trusted configuration file (when deliver_drop_privilege is false). */
-
-if (  removed_privilege
-   && (!trusted_config || opt_D_used)
-   && real_uid == exim_uid)
-  if (deliver_drop_privilege)
-    really_exim = TRUE; /* let logging work normally */
-  else
-    log_write(0, LOG_MAIN|LOG_PANIC,
-      "exim user lost privilege for using %s option",
-      trusted_config? "-D" : "-C");
-
-/* Start up Perl interpreter if Perl support is configured and there is a
-perl_startup option, and the configuration or the command line specifies
-initializing starting. Note that the global variables are actually called
-opt_perl_xxx to avoid clashing with perl's namespace (perl_*). */
-
-#ifdef EXIM_PERL
-if (perl_start_option != 0)
-  opt_perl_at_start = (perl_start_option > 0);
-if (opt_perl_at_start && opt_perl_startup != NULL)
-  {
-  uschar *errstr;
-  DEBUG(D_any) debug_printf("Starting Perl interpreter\n");
-  errstr = init_perl(opt_perl_startup);
-  if (errstr != NULL)
-    {
-    fprintf(stderr, "exim: error in perl_startup code: %s\n", errstr);
-    return EXIT_FAILURE;
-    }
-  opt_perl_started = TRUE;
-  }
-#endif /* EXIM_PERL */
-
-/* Log the arguments of the call if the configuration file said so. This is
-a debugging feature for finding out what arguments certain MUAs actually use.
-Don't attempt it if logging is disabled, or if listing variables or if
-verifying/testing addresses or expansions. */
-
-if (((debug_selector & D_any) != 0 || LOGGING(arguments))
-      && really_exim && !list_options && !checking)
-  {
-  int i;
-  uschar *p = big_buffer;
-  Ustrcpy(p, "cwd= (failed)");
-
-  Ustrncpy(p + 4, initial_cwd, big_buffer_size-5);
-
-  while (*p) p++;
-  (void)string_format(p, big_buffer_size - (p - big_buffer), " %d args:", argc);
-  while (*p) p++;
-  for (i = 0; i < argc; i++)
-    {
-    int len = Ustrlen(argv[i]);
-    const uschar *printing;
-    uschar *quote;
-    if (p + len + 8 >= big_buffer + big_buffer_size)
-      {
-      Ustrcpy(p, " ...");
-      log_write(0, LOG_MAIN, "%s", big_buffer);
-      Ustrcpy(big_buffer, "...");
-      p = big_buffer + 3;
-      }
-    printing = string_printing(argv[i]);
-    if (printing[0] == 0) quote = US"\""; else
-      {
-      const uschar *pp = printing;
-      quote = US"";
-      while (*pp != 0) if (isspace(*pp++)) { quote = US"\""; break; }
-      }
-    sprintf(CS p, " %s%.*s%s", quote, (int)(big_buffer_size -
-      (p - big_buffer) - 4), printing, quote);
-    while (*p) p++;
-    }
-
-  if (LOGGING(arguments))
-    log_write(0, LOG_MAIN, "%s", big_buffer);
-  else
-    debug_printf("%s\n", big_buffer);
-  }
-
-/* Set the working directory to be the top-level spool directory. We don't rely
-on this in the code, which always uses fully qualified names, but it's useful
-for core dumps etc. Don't complain if it fails - the spool directory might not
-be generally accessible and calls with the -C option (and others) have lost
-privilege by now. Before the chdir, we try to ensure that the directory exists.
-*/
-
-if (Uchdir(spool_directory) != 0)
-  {
-  int dummy;
-  (void)directory_make(spool_directory, US"", SPOOL_DIRECTORY_MODE, FALSE);
-  dummy = /* quieten compiler */ Uchdir(spool_directory);
-  }
-
-/* Handle calls with the -bi option. This is a sendmail option to rebuild *the*
-alias file. Exim doesn't have such a concept, but this call is screwed into
-Sun's YP makefiles. Handle this by calling a configured script, as the real
-user who called Exim. The -oA option can be used to pass an argument to the
-script. */
-
-if (bi_option)
-  {
-  (void)fclose(config_file);
-  if (bi_command != NULL)
-    {
-    int i = 0;
-    uschar *argv[3];
-    argv[i++] = bi_command;
-    if (alias_arg != NULL) argv[i++] = alias_arg;
-    argv[i++] = NULL;
-
-    setgroups(group_count, group_list);
-    exim_setugid(real_uid, real_gid, FALSE, US"running bi_command");
-
-    DEBUG(D_exec) debug_printf("exec %.256s %.256s\n", argv[0],
-      (argv[1] == NULL)? US"" : argv[1]);
-
-    execv(CS argv[0], (char *const *)argv);
-    fprintf(stderr, "exim: exec failed: %s\n", strerror(errno));
-    exit(EXIT_FAILURE);
-    }
-  else
-    {
-    DEBUG(D_any) debug_printf("-bi used but bi_command not set; exiting\n");
-    exit(EXIT_SUCCESS);
-    }
-  }
-
-/* We moved the admin/trusted check to be immediately after reading the
-configuration file.  We leave these prints here to ensure that syslog setup,
-logfile setup, and so on has already happened. */
-
 if (trusted_caller) DEBUG(D_any) debug_printf("trusted user\n");
 if (admin_user) DEBUG(D_any) debug_printf("admin user\n");
 
@@ -4229,7 +3757,7 @@ real, but are permitted when checking things (-be, -bv, -bt, -bh, -bf, -bF).
 Note that authority for performing certain actions on messages is tested in the
 queue_action() function. */
 
-if (!trusted_caller && !checking)
+if (!trusted_caller && !checking && filter_test == FTEST_NONE)
   {
   sender_host_name = sender_host_address = interface_address =
     sender_ident = received_protocol = NULL;
@@ -4247,21 +3775,6 @@ else
     sender_host_port = check_port(sender_host_address);
   if (interface_address != NULL)
     interface_port = check_port(interface_address);
-  }
-
-/* If the caller is trusted, then they can use -G to suppress_local_fixups. */
-if (flag_G)
-  {
-  if (trusted_caller)
-    {
-    suppress_local_fixups = suppress_local_fixups_default = TRUE;
-    DEBUG(D_acl) debug_printf("suppress_local_fixups forced on by -G\n");
-    }
-  else
-    {
-    fprintf(stderr, "exim: permission denied (-G requires a trusted user)\n");
-    return EXIT_FAILURE;
-    }
   }
 
 /* If an SMTP message is being received check to see if the standard input is a
@@ -4285,7 +3798,7 @@ if (smtp_input)
         interface_address = host_ntoa(-1, &interface_sock, NULL,
           &interface_port);
 
-      if (host_is_tls_on_connect_port(interface_port)) tls_in.on_connect = TRUE;
+      if (host_is_tls_on_connect_port(interface_port)) tls_on_connect = TRUE;
 
       if (real_uid == root_uid || real_uid == exim_uid || interface_port < 1024)
         {
@@ -4451,12 +3964,13 @@ if (msg_action_arg > 0 && msg_action != MSG_DELIVER && msg_action != MSG_LOAD)
   exit(yield);
   }
 
-/* We used to set up here to skip reading the ACL section, on
- (msg_action_arg > 0 || (queue_interval == 0 && !daemon_listen)
-Now, since the intro of the ${acl } expansion, ACL definitions may be
-needed in transports so we lost the optimisation. */
+/* All the modes below here require the remaining configuration sections
+to be read, except that we can skip over the ACL setting when delivering
+specific messages, or doing a queue run. (For various testing cases we could
+skip too, but as they are rare, it doesn't really matter.) The argument is TRUE
+for skipping. */
 
-readconf_rest();
+readconf_rest(msg_action_arg > 0 || (queue_interval == 0 && !daemon_listen));
 
 /* The configuration data will have been read into POOL_PERM because we won't
 ever want to reset back past it. Change the current pool to POOL_MAIN. In fact,
@@ -4591,42 +4105,26 @@ if (test_retry_arg >= 0)
   }
 
 /* Handle a request to list one or more configuration options */
-/* If -n was set, we suppress some information */
 
 if (list_options)
   {
   set_process_info("listing variables");
-  if (recipients_arg >= argc) readconf_print(US"all", NULL, flag_n);
+  if (recipients_arg >= argc) readconf_print(US"all", NULL);
     else for (i = recipients_arg; i < argc; i++)
       {
       if (i < argc - 1 &&
           (Ustrcmp(argv[i], "router") == 0 ||
            Ustrcmp(argv[i], "transport") == 0 ||
            Ustrcmp(argv[i], "authenticator") == 0 ||
-           Ustrcmp(argv[i], "macro") == 0 ||
-           Ustrcmp(argv[i], "environment") == 0))
+           Ustrcmp(argv[i], "macro") == 0))
         {
-        readconf_print(argv[i+1], argv[i], flag_n);
+        readconf_print(argv[i+1], argv[i]);
         i++;
         }
-      else readconf_print(argv[i], NULL, flag_n);
+      else readconf_print(argv[i], NULL);
       }
   exim_exit(EXIT_SUCCESS);
   }
-
-if (list_config)
-  {
-  set_process_info("listing config");
-  readconf_print(US"config", NULL, flag_n);
-  exim_exit(EXIT_SUCCESS);
-  }
-
-
-/* Initialise subsystems as required */
-#ifndef DISABLE_DKIM
-dkim_exim_init();
-#endif
-deliver_init();
 
 
 /* Handle a request to deliver one or more messages that are already on the
@@ -4684,10 +4182,7 @@ if (queue_interval == 0 && !daemon_listen)
     (start_queue_run_id == NULL)? US"" : start_queue_run_id,
     (stop_queue_run_id == NULL)?  US"" : US" stopping at ",
     (stop_queue_run_id == NULL)?  US"" : stop_queue_run_id);
-  if (*queue_name)
-    set_process_info("running the '%s' queue (single queue run)", queue_name);
-  else
-    set_process_info("running the queue (single queue run)");
+  set_process_info("running the queue (single queue run)");
   queue_run(start_queue_run_id, stop_queue_run_id, FALSE);
   exim_exit(EXIT_SUCCESS);
   }
@@ -4815,7 +4310,7 @@ returns. We leave this till here so that the originator_ fields are available
 for incoming messages via the daemon. The daemon cannot be run in mua_wrapper
 mode. */
 
-if (daemon_listen || inetd_wait_mode || queue_interval > 0)
+if (daemon_listen || queue_interval > 0)
   {
   if (mua_wrapper)
     {
@@ -4886,7 +4381,8 @@ if ((!smtp_input && sender_address == NULL) ||
   if (sender_address == NULL             /* No sender_address set */
        ||                                /*         OR            */
        (sender_address[0] != 0 &&        /* Non-empty sender address, AND */
-       !checking))                       /* Not running tests, including filter tests */
+       !checking &&                      /* Not running tests, AND */
+       filter_test == FTEST_NONE))       /* Not testing a filter */
     {
     sender_address = originator_login;
     sender_address_forced = FALSE;
@@ -4971,7 +4467,6 @@ Otherwise, if -bem was used, read a message from stdin. */
 
 if (expansion_test)
   {
-  dns_init(FALSE, FALSE, FALSE);
   if (msg_action_arg > 0 && msg_action == MSG_LOAD)
     {
     uschar spoolname[256];  /* Not big_buffer; used in spool_read_header() */
@@ -4982,7 +4477,7 @@ if (expansion_test)
       }
     message_id = argv[msg_action_arg];
     (void)string_format(spoolname, sizeof(spoolname), "%s-H", message_id);
-    if ((deliver_datafile = spool_open_datafile(message_id)) < 0)
+    if (!spool_open_datafile(message_id))
       printf ("Failed to load message datafile %s\n", message_id);
     if (spool_read_header(spoolname, TRUE, FALSE) != spool_read_OK)
       printf ("Failed to load message %s\n", message_id);
@@ -5032,8 +4527,8 @@ if (expansion_test)
 
   else
     {
-    char *(*fn_readline)(const char *) = NULL;
-    void (*fn_addhist)(const char *) = NULL;
+    char *(*fn_readline)(char *) = NULL;
+    char *(*fn_addhist)(char *) = NULL;
 
     #ifdef USE_READLINE
     void *dlhandle = set_readline(&fn_readline, &fn_addhist);
@@ -5105,7 +4600,7 @@ if (host_checking)
       verify_get_ident(1413);
     }
 
-  /* In case the given address is a non-canonical IPv6 address, canonicalize
+  /* In case the given address is a non-canonical IPv6 address, canonicize
   it. The code works for both IPv4 and IPv6, as it happens. */
 
   size = host_aton(sender_host_address, x);
@@ -5127,9 +4622,8 @@ if (host_checking)
     "**** This is not for real!\n\n",
       sender_host_address);
 
-  memset(sender_host_cache, 0, sizeof(sender_host_cache));
   if (verify_check_host(&hosts_connection_nolog) == OK)
-    BIT_CLEAR(log_selector, log_selector_size, Li_smtp_connection);
+    log_write_selector &= ~L_smtp_connection;
   log_write(L_smtp_connection, LOG_MAIN, "%s", smtp_get_connection_info());
 
   /* NOTE: We do *not* call smtp_log_no_mail() if smtp_start_session() fails,
@@ -5139,21 +4633,12 @@ if (host_checking)
 
   if (smtp_start_session())
     {
-    for (reset_point = store_get(0); ; store_reset(reset_point))
+    reset_point = store_get(0);
+    for (;;)
       {
+      store_reset(reset_point);
       if (smtp_setup_msg() <= 0) break;
       if (!receive_msg(FALSE)) break;
-
-      return_path = sender_address = NULL;
-      dnslist_domain = dnslist_matched = NULL;
-#ifndef DISABLE_DKIM
-      dkim_cur_signer = NULL;
-#endif
-      acl_var_m = NULL;
-      deliver_localpart_orig = NULL;
-      deliver_domain_orig = NULL;
-      callout_address = sending_ip_address = NULL;
-      sender_rate = sender_rate_limit = sender_rate_period = NULL;
       }
     smtp_log_no_mail();
     }
@@ -5163,8 +4648,7 @@ if (host_checking)
 
 /* Arrange for message reception if recipients or SMTP were specified;
 otherwise complain unless a version print (-bV) happened or this is a filter
-verification test or info dump.
-In the former case, show the configuration file name. */
+verification test. In the former case, show the configuration file name. */
 
 if (recipients_arg >= argc && !extract_recipients && !smtp_input)
   {
@@ -5172,12 +4656,6 @@ if (recipients_arg >= argc && !extract_recipients && !smtp_input)
     {
     printf("Configuration file is %s\n", config_main_filename);
     return EXIT_SUCCESS;
-    }
-
-  if (info_flag != CMDINFO_NONE)
-    {
-    show_exim_information(info_flag, info_stdout ? stdout : stderr);
-    return info_stdout ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
   if (filter_test == FTEST_NONE)
@@ -5207,9 +4685,6 @@ if (mua_wrapper)
   deliver_drop_privilege = TRUE;
   queue_smtp = FALSE;
   queue_smtp_domains = NULL;
-#ifdef SUPPORT_I18N
-  message_utf8_downconvert = -1;	/* convert-if-needed */
-#endif
   }
 
 
@@ -5276,11 +4751,8 @@ if (smtp_input)
   }
 else
   {
-  int old_pool = store_pool;
-  store_pool = POOL_PERM;
-  if (!received_protocol)
+  if (received_protocol == NULL)
     received_protocol = string_sprintf("local%s", called_as);
-  store_pool = old_pool;
   set_process_info("accepting a local non-SMTP message from <%s>",
     sender_address);
   }
@@ -5314,9 +4786,8 @@ if (smtp_input)
   {
   smtp_in = stdin;
   smtp_out = stdout;
-  memset(sender_host_cache, 0, sizeof(sender_host_cache));
   if (verify_check_host(&hosts_connection_nolog) == OK)
-    BIT_CLEAR(log_selector, log_selector_size, Li_smtp_connection);
+    log_write_selector &= ~L_smtp_connection;
   log_write(L_smtp_connection, LOG_MAIN, "%s", smtp_get_connection_info());
   if (!smtp_start_session())
     {
@@ -5366,7 +4837,7 @@ February 2003: That's *still* not the end of the story. There are now versions
 of Linux (where SIG_IGN does work) that are picky. If, having set SIG_IGN, a
 process then calls waitpid(), a grumble is written to the system log, because
 this is logically inconsistent. In other words, it doesn't like the paranoia.
-As a consequence of this, the waitpid() below is now excluded if we are sure
+As a consequenc of this, the waitpid() below is now excluded if we are sure
 that SIG_IGN works. */
 
 if (!synchronous_delivery)
@@ -5394,6 +4865,7 @@ collapsed). */
 
 while (more)
   {
+  store_reset(reset_point);
   message_id[0] = 0;
 
   /* Handle the SMTP case; call smtp_setup_mst() to deal with the initial SMTP
@@ -5435,7 +4907,7 @@ while (more)
       more = receive_msg(extract_recipients);
       if (message_id[0] == 0)
         {
-        if (more) goto moreloop;
+        if (more) continue;
         smtp_log_no_mail();               /* Log no mail if configured */
         exim_exit(EXIT_FAILURE);
         }
@@ -5491,6 +4963,7 @@ while (more)
 
         if (recipients_max > 0 && ++rcount > recipients_max &&
             !extract_recipients)
+          {
           if (error_handling == ERRORS_STDERR)
             {
             fprintf(stderr, "exim: too many recipients\n");
@@ -5502,22 +4975,11 @@ while (more)
               moan_to_sender(ERRMESS_TOOMANYRECIP, NULL, NULL, stdin, TRUE)?
                 errors_sender_rc : EXIT_FAILURE;
             }
+          }
 
-#ifdef SUPPORT_I18N
-	{
-	BOOL b = allow_utf8_domains;
-	allow_utf8_domains = TRUE;
-#endif
         recipient =
           parse_extract_address(s, &errmess, &start, &end, &domain, FALSE);
 
-#ifdef SUPPORT_I18N
-	if (string_is_utf8(recipient))
-	  message_smtputf8 = TRUE;
-	else
-	  allow_utf8_domains = b;
-	}
-#endif
         if (domain == 0 && !allow_unqualified_recipient)
           {
           recipient = NULL;
@@ -5569,27 +5031,13 @@ while (more)
     ignored; rejecting here would just add complication, and it can just as
     well be done later. Allow $recipients to be visible in the ACL. */
 
-    if (acl_not_smtp_start)
+    if (acl_not_smtp_start != NULL)
       {
       uschar *user_msg, *log_msg;
       enable_dollar_recipients = TRUE;
       (void)acl_check(ACL_WHERE_NOTSMTP_START, NULL, acl_not_smtp_start,
         &user_msg, &log_msg);
       enable_dollar_recipients = FALSE;
-      }
-
-    /* Pause for a while waiting for input.  If none received in that time,
-    close the logfile, if we had one open; then if we wait for a long-running
-    datasource (months, in one use-case) log rotation will not leave us holding
-    the file copy. */
-
-    if (!receive_timeout)
-      {
-      struct timeval t = { 30*60, 0 };	/* 30 minutes */
-      fd_set r;
-
-      FD_ZERO(&r); FD_SET(0, &r);
-      if (select(1, &r, NULL, NULL, &t) == 0) mainlog_close();
       }
 
     /* Read the data for the message. If filter_test is not FTEST_NONE, this
@@ -5631,7 +5079,9 @@ while (more)
       return_path = string_copy(sender_address);
       }
     else
+      {
       printf("Return-path = %s\n", (return_path[0] == 0)? US"<>" : return_path);
+      }
     printf("Sender      = %s\n", (sender_address[0] == 0)? US"<>" : sender_address);
 
     receive_add_recipient(
@@ -5645,11 +5095,7 @@ while (more)
     if (ftest_prefix != NULL) printf("Prefix    = %s\n", ftest_prefix);
     if (ftest_suffix != NULL) printf("Suffix    = %s\n", ftest_suffix);
 
-    if (chdir("/"))   /* Get away from wherever the user is running this from */
-      {
-      DEBUG(D_receive) debug_printf("chdir(\"/\") failed\n");
-      exim_exit(EXIT_FAILURE);
-      }
+    (void)chdir("/");   /* Get away from wherever the user is running this from */
 
     /* Now we run either a system filter test, or a user filter test, or both.
     In the latter case, headers added by the system filter will persist and be
@@ -5756,8 +5202,8 @@ while (more)
 
       if (geteuid() != root_uid && !deliver_drop_privilege && !unprivileged)
         {
-        (void)child_exec_exim(CEE_EXEC_EXIT, FALSE, NULL, FALSE,
-		2, US"-Mc", message_id);
+        (void)child_exec_exim(CEE_EXEC_EXIT, FALSE, NULL, FALSE, 2, US"-Mc",
+          message_id);
         /* Control does not return here. */
         }
 
@@ -5798,23 +5244,6 @@ while (more)
   #ifndef SIG_IGN_WORKS
   while (waitpid(-1, NULL, WNOHANG) > 0);
   #endif
-
-moreloop:
-  return_path = sender_address = NULL;
-  authenticated_sender = NULL;
-  deliver_localpart_orig = NULL;
-  deliver_domain_orig = NULL;
-  deliver_host = deliver_host_address = NULL;
-  dnslist_domain = dnslist_matched = NULL;
-#ifdef WITH_CONTENT_SCAN
-  malware_name = NULL;
-#endif
-  callout_address = NULL;
-  sending_ip_address = NULL;
-  acl_var_m = NULL;
-  { int i; for(i=0; i<REGEX_VARS; i++) regex_vars[i] = NULL; }
-
-  store_reset(reset_point);
   }
 
 exim_exit(EXIT_SUCCESS);   /* Never returns */
