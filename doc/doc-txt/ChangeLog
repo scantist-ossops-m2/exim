@@ -201,6 +201,10 @@ HS/03 Bug 2201: Fix checking for leading-dot on a line during headers reading
       from SMTP input.  Previously it was always done; now only done for DATA
       and not BDAT commands.  CVE-2017-16944.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.89
 -----------------
