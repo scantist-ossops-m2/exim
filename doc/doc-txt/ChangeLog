@@ -67,6 +67,10 @@ PP/01 Fix broken Heimdal GSSAPI authenticator integration.
       Broken in f2ed27cf5, missing an equals sign for specified-initialisers.
       Broken also in d185889f4, with init system revamp.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.90
 -----------------
