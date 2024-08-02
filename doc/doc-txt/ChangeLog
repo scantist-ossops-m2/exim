@@ -117,6 +117,10 @@ JH/30 Bug 1897: fix callouts connection fallback from TLS to cleartext.
 PP/01 Changed default Diffie-Hellman parameters to be Exim-specific, created
       by me.  Added RFC7919 DH primes as an alternative.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.87
 -----------------
