@@ -102,6 +102,10 @@ JH/17 Fix inbound CHUNKING when DKIM disabled at runtime.
 HS/01 Fix portability problems introduced by PP/08 for platforms where
       realloc(NULL) is not equivalent to malloc() [SunOS et al].
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.88
 -----------------
