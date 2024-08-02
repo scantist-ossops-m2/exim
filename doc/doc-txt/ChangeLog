@@ -193,6 +193,10 @@ JH/33 Downgrade an unfound-list name (usually a typo in the config file) from
       something like "domains check lookup or other defer".  The SMTP 451
       message is still "Temporary local problem".
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.89
 -----------------
