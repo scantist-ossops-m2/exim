@@ -146,6 +146,10 @@ HS/03 Use "auto" as the default EC curve parameter. For OpenSSL < 1.0.2
 JH/34 SECURITY: Use proper copy of DATA command in error message.
       Could leak key material.  Remotely explaoitable.  CVE-2016-9963.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.87
 -----------------
