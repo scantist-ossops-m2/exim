@@ -215,6 +215,10 @@ JH/39 Fix syslog logging for syslog_timestamp=no and log_selector +millisec.
       Fix also for syslog_pid=no and log_selector +pid, for which the pid
       corrupted the output.
 
+JH/24 Bug 2310: Raise a msg:fail:internal event for each undelivered recipient,
+      and a msg:complete for the whole, when a message is manually reoved using
+      -Mrm.  Developement by Matthias Kurz, hacked on by JH.
+
 
 Exim version 4.90
 -----------------
